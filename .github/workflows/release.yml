@@ -1,0 +1,42 @@
+# Tag a version (git tag v0.7.0 && git push --tags) to build the portable Windows zip and the
+# web zip and attach them to a GitHub Release.
+name: Release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Package portable app
+        run: npm run package:win
+      - name: Slim and zip
+        shell: pwsh
+        run: |
+          $app = "dist/TextForge-win32-x64/resources/app"
+          Get-ChildItem "$app/node_modules" | Where-Object { $_.Name -ne 'monaco-editor' } | Remove-Item -Recurse -Force
+          Copy-Item packaging/README.txt dist/TextForge-win32-x64/README.txt
+          Copy-Item LICENSE dist/TextForge-win32-x64/LICENSE.txt
+          $v = (Get-Content package.json | ConvertFrom-Json).version
+          Compress-Archive -Path dist/TextForge-win32-x64 -DestinationPath "dist/TextForge-$v-win-x64-portable.zip"
+          node build-web.js
+          Copy-Item packaging/README.txt web-dist/selfhost/README.txt
+          Compress-Archive -Path web-dist/selfhost -DestinationPath "dist/TextForge-$v-web.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/TextForge-*-win-x64-portable.zip
+            dist/TextForge-*-web.zip
+          generate_release_notes: true

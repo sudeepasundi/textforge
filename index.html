@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TextForge</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand" title="TextForge">
+      <svg viewBox="0 0 24 24" class="brand-mark" aria-hidden="true"><path d="M2 13h4l2.5-7 4 13 3-9 2 3H22"/></svg>
+      <span>TextForge</span>
+    </div>
+    <div id="tabs" role="tablist"></div>
+    <div class="top-actions">
+      <button class="icon-btn" data-act="new" title="New tab (Ctrl+N)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="icon-btn" data-act="open" title="Open file (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+      <button class="icon-btn" data-act="save" title="Save (Ctrl+S)"><svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3M7 21v-7h10v7"/></svg></button>
+      <button id="palette-btn" data-act="palette" title="Search commands (Ctrl+Shift+P)">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span>Search commands</span><kbd>Ctrl Shift P</kbd>
+      </button>
+    </div>
+  </header>
+
+  <div id="body">
+    <nav id="rail" aria-label="Tools">
+      <button class="rail-btn" data-view="insights" title="Log insights (Ctrl+1)"><svg viewBox="0 0 24 24"><path d="M2 12h4l3-8 4 16 3-8h6"/></svg></button>
+      <button class="rail-btn" data-view="extract" title="Extract data (Ctrl+2)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg></button>
+      <button class="rail-btn" data-view="highlight" title="Highlight rules (Ctrl+3)"><svg viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg></button>
+      <button class="rail-btn" data-view="copilot" title="Copilot (Ctrl+4)"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15v4M17 17h4"/></svg></button>
+      <span class="rail-grow"></span>
+      <button class="rail-btn" data-view="appearance" title="Appearance and settings (Ctrl+,)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></button>
+      <button class="rail-btn" data-act="help" title="Keyboard shortcuts"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.2-2.5 3.9M12 17.5v.01"/></svg></button>
+    </nav>
+
+    <aside id="side" hidden>
+      <div class="side-head"><h2 id="side-title"></h2><button class="icon-btn small" id="side-close" title="Close sidebar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+      <section class="view" data-view="insights"></section>
+      <section class="view" data-view="extract"></section>
+      <section class="view" data-view="highlight"></section>
+      <section class="view" data-view="appearance"></section>
+      <div id="side-resize" title="Drag to resize"></div>
+    </aside>
+
+    <main id="main">
+      <div id="signal" hidden>
+        <div class="signal-meta"></div>
+        <svg id="signal-svg" preserveAspectRatio="none"></svg>
+      </div>
+      <div id="filterbar" hidden></div>
+      <div id="work">
+        <div id="diskbar" role="status" hidden></div>
+        <div id="editor"></div>
+        <div id="welcome" hidden>
+          <div class="wl-card">
+            <svg viewBox="0 0 24 24" class="wl-mark" aria-hidden="true"><path d="M2 13h4l2.5-7 4 13 3-9 2 3H22"/></svg>
+            <h1>Start with a log, a table or a chat</h1>
+            <p>Paste anywhere with <kbd>Ctrl</kbd> <kbd>V</kbd>. Logs are detected, tables keep their columns.</p>
+            <div class="wl-actions">
+              <button data-wl="open"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Open a file</span><kbd>Ctrl O</kbd></button>
+              <button data-wl="sample"><svg viewBox="0 0 24 24"><path d="M2 12h4l3-8 4 16 3-8h6"/></svg><span>Try the sample log</span></button>
+              <button data-wl="palette"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search commands</span><kbd>Ctrl Shift P</kbd></button>
+            </div>
+          </div>
+        </div>
+        <div id="preview" hidden>
+          <div class="pv-head">
+            <strong>Preview</strong>
+            <span class="grow"></span>
+            <button id="pv-copy" title="Copies the formatted document. Paste into Teams, Outlook or Word to keep tables and formatting.">Copy as rich text</button>
+            <button class="icon-btn small" id="pv-close" title="Close preview (Alt+P)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+          </div>
+          <div id="preview-body" class="md"></div>
+        </div>
+      </div>
+      <button id="cp-fab" title="Copilot (Alt+4)" aria-label="Copilot"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15v4M17 17h4"/></svg></button>
+      <div id="panel" hidden>
+        <div id="panel-head">
+          <strong id="panel-title"></strong>
+          <span id="panel-tools"></span>
+          <span class="grow"></span>
+          <button class="icon-btn small" id="panel-close" title="Close panel"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+        </div>
+        <div id="panel-body"></div>
+      </div>
+    </main>
+
+    <div id="cp-host" class="float" hidden role="dialog" aria-label="Copilot">
+      <div class="cp-head" id="cp-head">
+        <svg class="cp-mark" viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15v4M17 17h4"/></svg>
+        <strong>Copilot</strong>
+        <span class="grow"></span>
+        <button class="icon-btn small" id="cp-reload" title="Reload Copilot"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
+        <button class="icon-btn small" id="cp-external" title="Open Copilot in your browser"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button>
+        <button class="icon-btn small" id="cp-dock" title="Dock to the side"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></button>
+        <button class="icon-btn small" id="cp-close" title="Close (Alt+4)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+      </div>
+      <div id="cp-body"></div>
+      <div class="cp-grip" data-dir="l" title="Drag to resize. Double-click to reset."></div>
+      <div class="cp-grip" data-dir="r"></div>
+      <div class="cp-grip" data-dir="b"></div>
+      <div class="cp-grip" data-dir="bl"></div>
+      <div class="cp-grip" data-dir="br"></div>
+    </div>
+  </div>
+
+  <footer id="statusbar">
+    <span id="st-pos">Ln 1, Col 1</span>
+    <button id="st-log" class="st-chip" hidden title="Open log insights"></button>
+    <button id="st-preview" class="st-chip" hidden title="Show the formatted preview (Alt+P)">Preview</button>
+    <button id="st-follow" class="st-chip" hidden title="Follow the file as it grows (live tail)">Follow</button>
+    <span class="grow"></span>
+    <select id="st-lang" title="Language mode"></select>
+    <button id="st-eol" title="Switch line endings">LF</button>
+    <select id="st-enc" title="Encoding used when saving">
+      <option value="utf8">UTF-8</option>
+      <option value="utf8-bom">UTF-8 BOM</option>
+      <option value="utf16le">UTF-16 LE</option>
+      <option value="latin1">ANSI (Latin-1)</option>
+    </select>
+  </footer>
+
+  <div id="palette" hidden>
+    <div id="palette-box">
+      <input id="palette-input" placeholder="Type a command" spellcheck="false" autocomplete="off">
+      <div id="palette-list" role="listbox"></div>
+    </div>
+  </div>
+  <div id="toast" hidden></div>
+  <div id="modal" hidden><div id="modal-box"></div></div>
+
+  <script src="node_modules/monaco-editor/min/vs/loader.js"></script>
+  <script src="tables.js"></script>
+  <script src="markdown.js"></script>
+  <script src="logs.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+2026-11-02T10:15:01.112+05:30  INFO 18244 --- [order-service] [           main] c.e.order.OrderServiceApplication        : Starting OrderServiceApplication v1.4.2 using Java 21.0.4 with PID 18244
+2026-11-02T10:15:03.540+05:30  INFO 18244 --- [order-service] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8082 (http)
+2026-11-02T10:15:05.918+05:30  INFO 18244 --- [order-service] [           main] o.s.c.n.eureka.InstanceInfoFactory       : Setting initial instance status as: STARTING
+2026-11-02T10:15:06.201+05:30  WARN 18244 --- [order-service] [           main] o.s.k.c.KafkaMessageListenerContainer    : topic=order-events partition=0 offset=1882 lag detected on startup
+2026-11-02T10:15:06.877+05:30  INFO 18244 --- [order-service] [           main] c.e.order.OrderServiceApplication        : Started OrderServiceApplication in 6.112 seconds (process running for 6.9)
+2026-11-02T10:16:10.004+05:30  INFO 18244 --- [order-service] [nio-8082-exec-1] c.e.order.web.OrderController            : traceId=6f1c2a9be0d34f11 POST /api/orders userId=4512 orderId=90001 took 84ms
+2026-11-02T10:16:10.390+05:30 DEBUG 18244 --- [order-service] [nio-8082-exec-1] c.e.order.repo.OrderRepository           : traceId=6f1c2a9be0d34f11 select o from Order o where o.id = 90001
+2026-11-02T10:16:12.551+05:30  INFO 18244 --- [order-service] [nio-8082-exec-2] c.e.order.web.OrderController            : traceId=a81d44c0f2e94b07 GET /api/orders/90001 userId=4512 took 12ms
+2026-11-02T10:16:15.020+05:30  INFO 18244 --- [order-service] [nio-8082-exec-3] c.e.order.web.OrderController            : traceId=c3e09f1a7b264d58 POST /api/orders userId=7788 orderId=90002 took 1534ms
+2026-11-02T10:16:15.021+05:30 ERROR 18244 --- [order-service] [nio-8082-exec-3] c.e.order.service.PaymentClient          : traceId=c3e09f1a7b264d58 Payment call failed for orderId=90002 password=hunter2 email=ravi.k@example.com
+feign.RetryableException: Read timed out executing POST http://payment-service/api/payments
+	at feign.FeignException.errorExecuting(FeignException.java:268)
+	at feign.SynchronousMethodHandler.executeAndDecode(SynchronousMethodHandler.java:131)
+	at feign.SynchronousMethodHandler.invoke(SynchronousMethodHandler.java:91)
+	at com.example.order.service.PaymentClient.charge(PaymentClient.java:57)
+	at com.example.order.service.OrderService.placeOrder(OrderService.java:112)
+	at org.springframework.aop.framework.ReflectiveMethodInvocation.proceed(ReflectiveMethodInvocation.java:184)
+Caused by: java.net.SocketTimeoutException: Read timed out
+	at java.base/sun.nio.ch.NioSocketImpl.timedRead(NioSocketImpl.java:288)
+	at java.base/java.net.Socket$SocketInputStream.read(Socket.java:1099)
+	... 42 more
+2026-11-02T10:16:20.732+05:30  WARN 18244 --- [order-service] [nio-8082-exec-4] c.e.order.web.GlobalExceptionHandler     : traceId=0b9d7e1f55aa4c21 Validation failed for orderId=90003: quantity must be greater than 0
+2026-11-02T10:16:21.118+05:30  INFO 18244 --- [order-service] [nio-8082-exec-5] c.e.order.web.OrderController            : traceId=d2f8b6a1c9e04e77 POST /api/orders userId=1203 orderId=90004 took 97ms
+2026-11-02T10:16:25.300+05:30 ERROR 18244 --- [order-service] [nio-8082-exec-6] c.e.order.service.OrderService           : traceId=f1a2b3c4d5e6f708 Failed to place order orderId=90005
+java.lang.NullPointerException: Cannot invoke "com.example.order.model.Address.getPincode()" because "customer.address" is null
+	at com.example.order.service.ShippingService.estimate(ShippingService.java:41)
+	at com.example.order.service.OrderService.placeOrder(OrderService.java:98)
+	at org.springframework.transaction.interceptor.TransactionInterceptor.invoke(TransactionInterceptor.java:119)
+2026-11-02T10:16:31.840+05:30 ERROR 18244 --- [order-service] [nio-8082-exec-7] c.e.order.service.OrderService           : traceId=9e8d7c6b5a493827 Failed to place order orderId=90006
+java.lang.NullPointerException: Cannot invoke "com.example.order.model.Address.getPincode()" because "customer.address" is null
+	at com.example.order.service.ShippingService.estimate(ShippingService.java:41)
+	at com.example.order.service.OrderService.placeOrder(OrderService.java:98)
+2026-11-02T10:16:40.415+05:30  INFO 18244 --- [order-service] [ntainer#0-0-C-1] c.e.order.kafka.OrderEventsListener      : topic=order-events partition=0 offset=1883 processed orderId=90001 took 23ms
+2026-11-02T10:16:41.002+05:30  INFO 18244 --- [order-service] [ntainer#0-0-C-1] c.e.order.kafka.OrderEventsListener      : topic=order-events partition=1 offset=977 processed orderId=90004 took 31ms
+2026-11-02T10:17:02.660+05:30 ERROR 18244 --- [order-service] [nio-8082-exec-8] c.e.order.service.PaymentClient          : traceId=7a6b5c4d3e2f1a0b Payment call failed for orderId=90007 Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI0NTEyIn0.c2lnbmF0dXJlLXZhbHVl
+feign.RetryableException: Read timed out executing POST http://payment-service/api/payments
+	at feign.FeignException.errorExecuting(FeignException.java:268)
+	at com.example.order.service.PaymentClient.charge(PaymentClient.java:57)
+Caused by: java.net.SocketTimeoutException: Read timed out
+	... 40 more
+2026-11-02T10:17:05.250+05:30  INFO 18244 --- [order-service] [nio-8082-exec-9] c.e.order.web.OrderController            : traceId=5c4b3a291807f6e5 GET /api/orders?userId=4512 userId=4512 took 2210ms
+2026-11-02T10:17:40.900+05:30  WARN 18244 --- [order-service] [   scheduling-1] c.e.order.jobs.StaleOrderJob             : 3 orders stuck in PENDING for more than 15 minutes
+2026-11-02T10:18:12.031+05:30  INFO 18244 --- [order-service] [nio-8082-exec-1] c.e.order.web.OrderController            : traceId=e4d3c2b1a0f9e8d7 POST /api/orders userId=6021 orderId=90008 took 76ms

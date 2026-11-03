@@ -1,0 +1,33 @@
+{
+  "name": "textforge",
+  "productName": "TextForge",
+  "version": "0.7.0",
+  "description": "A log-aware text editor for backend developers",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/tables.test.js && node test/logs.test.js && node test/markdown.test.js && node test/autotables.test.js",
+    "test:e2e": "node test/checklist.e2e.js",
+    "test:ui": "node test/ui.e2e.js",
+    "test:ui:desktop": "node test/ui-desktop.e2e.js",
+    "test:disk": "node test/disk.e2e.js",
+    "test:auto": "node test/autotables.e2e.js",
+    "package:win": "electron-packager . TextForge --platform=win32 --arch=x64 --out=dist --overwrite --prune=true --ignore=\"^/(test|dist|web-dist|build|packaging|\\.github)($|/)\" --ignore=\"^/(build-web|web-api)\\.js$\" --ignore=\"/node_modules/monaco-editor/(esm|dev|min-maps)($|/)\"",
+    "build:web": "node build-web.js"
+  },
+  "dependencies": {
+    "monaco-editor": "^0.52.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.3.6",
+    "electron": "^33.2.0",
+    "jsdom": "^25.0.1"
+  },
+  "license": "MIT",
+  "author": "NUKE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sudeepasundi/textforge.git"
+  },
+  "homepage": "https://sudeepasundi.github.io/textforge/"
+}

@@ -1,0 +1,27 @@
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+
+contextBridge.exposeInMainWorld('api', {
+  os: process.platform,
+  frameless: true,
+  setTitleBar: (colors) => ipcRenderer.invoke('win:titlebar', colors),
+  startupFiles: () => ipcRenderer.invoke('startup-files'),
+  openDialog: () => ipcRenderer.invoke('dialog:open'),
+  readFile: (p) => ipcRenderer.invoke('file:read', p),
+  stat: (p) => ipcRenderer.invoke('file:stat', p),
+  readFrom: (p, offset) => ipcRenderer.invoke('file:readFrom', p, offset),
+  liveFiles: true,
+  sample: () => ipcRenderer.invoke('sample'),
+  saveFile: (args) => ipcRenderer.invoke('file:save', args),
+  saveAs: (args) => ipcRenderer.invoke('dialog:saveAs', args),
+  loadSession: () => ipcRenderer.invoke('session:load'),
+  saveSession: (data) => ipcRenderer.invoke('session:save', data),
+  saveSessionSync: (data) => ipcRenderer.sendSync('session:saveSync', data),
+  clipboardWrite: (args) => ipcRenderer.invoke('clipboard:write', args),
+  setTitle: (t) => ipcRenderer.invoke('win:title', t),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  pathForFile: (file) => webUtils.getPathForFile(file),
+  onOpenPaths: (cb) => ipcRenderer.on('open-paths', (_e, paths) => cb(paths)),
+  tailStart: (p) => ipcRenderer.invoke('tail:start', p),
+  tailStop: (p) => ipcRenderer.invoke('tail:stop', p),
+  onTailData: (cb) => ipcRenderer.on('tail:data', (_e, d) => cb(d)),
+});
