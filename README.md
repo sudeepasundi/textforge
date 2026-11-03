@@ -48,8 +48,9 @@ Browser tests (need Playwright and `web-dist/selfhost` served at http://127.0.0.
 
 ## Releases
 
-Pushing to `main` publishes the web version to GitHub Pages. Pushing a tag such as `v0.7.0` builds the
-portable Windows zip and the web zip and attaches them to a GitHub Release.
+Pushing to `main` publishes the web version to GitHub Pages. To publish downloads, run the **Release**
+workflow from the Actions tab (or push a tag such as `v0.7.0`). It builds the portable Windows zip and the
+web zip and attaches them to a GitHub Release tagged with the version in `package.json`.
 
 ## Privacy
 
