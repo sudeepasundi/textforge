@@ -1,0 +1,4 @@
+# Keep LF line endings everywhere (the Windows build machine would otherwise convert them).
+* text=auto eol=lf
+*.png binary
+*.woff2 binary

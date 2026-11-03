@@ -155,6 +155,7 @@
   const LOGGER_RE = /(?:^|\s)((?:[a-zA-Z_$][\w$]*\.)+[A-Za-z_$][\w$]*)(?=\s|:|$)/;
 
   function parseLine(line) {
+    if (line.charCodeAt(line.length - 1) === 13) line = line.slice(0, -1); // Windows line endings (CRLF)
     const trimmed = line.trimStart();
     if (trimmed[0] === '{' && line.length < 200000) {
       try {
