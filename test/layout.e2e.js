@@ -79,7 +79,20 @@ const mk = (svc, off) => Array.from({ length: 400 }, (_, i) => `2026-11-03 10:${
   await page.waitForTimeout(300);
   r = await page.evaluate(() => ({ open: !document.getElementById('split').hidden, right: __tf.split.tab && __tf.split.tab.name, tabs: __tf.tabs.map((t) => t.name) }));
   ok('Closing a tab never leaves the right side empty', !r.open || (r.right && r.tabs.includes(r.right)), JSON.stringify(r));
+  // timeline: drag a time range, double-click clears it
+  await page.evaluate(() => { __tf.closeSplit(); __tf.openSample(); });
+  await page.waitForTimeout(700);
+  const sb = await page.evaluate(() => { const b = document.getElementById('signal').getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; });
+  await page.mouse.move(sb.x + sb.w * 0.25, sb.y + sb.h * 0.6); await page.mouse.down();
+  await page.mouse.move(sb.x + sb.w * 0.45, sb.y + sb.h * 0.6, { steps: 8 }); await page.mouse.up();
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => ({ shown: __tf.active.an.vis.reduce((a, x) => a + x, 0), total: __tf.active.an.entries.length, from: __tf.active.filter.from, to: __tf.active.filter.to, shade: !document.querySelector('#signal .range').hidden }));
+  ok('Dragging on the timeline shows only that time range', r.shown > 0 && r.shown < r.total && r.from && r.to && r.shade, JSON.stringify(r));
+  await page.mouse.dblclick(sb.x + sb.w * 0.7, sb.y + sb.h * 0.6); await page.waitForTimeout(300);
+  r = await page.evaluate(() => ({ from: __tf.active.filter.from, to: __tf.active.filter.to, shade: !document.querySelector('#signal .range').hidden }));
+  ok('Double-clicking the timeline shows all times again', !r.from && !r.to && !r.shade, JSON.stringify(r));
   // phone
+  await page.setViewportSize({ width: 1440, height: 860 });
   await page.evaluate(() => __tf.openSplit());
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);

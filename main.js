@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, clipboard, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, clipboard, screen, shell, session } = require('electron');
 
 // Present a normal Chromium user agent so Microsoft sign-in pages treat the embedded Copilot like a browser.
 app.userAgentFallback = app.userAgentFallback.replace(/\s?(Electron|textforge|TextForge)\/\S+/gi, '');
@@ -221,6 +221,14 @@ ipcMain.handle('win:titlebar', (_e, { color, symbolColor, height }) => {
   if (!win || process.platform === 'darwin' || typeof win.setTitleBarOverlay !== 'function') return false;
   const h = Math.max(28, Math.min(48, Math.round(height || 40)));
   try { win.setTitleBarOverlay({ color, symbolColor, height: h }); return true; } catch { return false; }
+});
+
+// Forget the Copilot sign-in (cookies and site data of the embedded Copilot only).
+ipcMain.handle('copilot:signout', async () => {
+  const s = session.fromPartition('persist:copilot');
+  await s.clearStorageData();
+  await s.clearCache();
+  return true;
 });
 
 ipcMain.handle('open-external', (_e, url) => {

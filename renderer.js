@@ -1226,6 +1226,7 @@
       tl ? h('span', null, Logs.formatTs(tl.min, true) + '  to  ' + Logs.formatTs(tl.max) + '   (' + Logs.formatDuration(tl.max - tl.min) + ', bars of ' + Logs.formatDuration(tl.size) + ')') : h('span', null, 'No timestamps found'));
     const svg = $('#signal-svg');
     svg.innerHTML = '';
+    renderSignalRange(tl);
     if (!tl) return;
     const n = tl.buckets.length;
     const max = Math.max(1, ...tl.buckets.map((b) => b.total));
@@ -1276,6 +1277,26 @@
     }
   }
 
+  // The time range from the filter, shaded on the strip (everything outside it is dimmed).
+  function renderSignalRange(tl) {
+    const box = $('#signal');
+    let shade = box.querySelector('.range');
+    if (!shade) { shade = h('div', { class: 'range', hidden: true }, h('i', { class: 'l' }), h('i', { class: 'r' })); box.append(shade); }
+    const f = active && active.filter;
+    if (!tl || !f || (!f.from && !f.to)) { shade.hidden = true; return; }
+    const an = active.an;
+    const ref = an.entries.find((e) => e.ts != null);
+    const start = tl.buckets[0].start, span = tl.buckets.length * tl.size;
+    let a = f.from ? Logs.parseTimeInput(f.from, ref ? ref.ts : null) : start;
+    let b = f.to ? Logs.parseTimeInput(f.to, ref ? ref.ts : null) : start + span;
+    if (f.to && /^\d{1,2}:\d{2}$/.test(f.to.trim())) b += 59999;
+    if (a == null || b == null) { shade.hidden = true; return; }
+    const pa = Math.max(0, Math.min(1, (a - start) / span)), pb = Math.max(0, Math.min(1, (b - start) / span));
+    shade.hidden = false;
+    shade.querySelector('.l').style.width = (pa * 100) + '%';
+    shade.querySelector('.r').style.width = ((1 - pb) * 100) + '%';
+  }
+
   function signalBucketAt(clientX) {
     const an = active && active.an;
     if (!an || !an.timeline) return null;
@@ -1301,7 +1322,57 @@
       tip.textContent = Logs.formatTs(r.b.start) + '  ' + r.b.total + ' entries' + (r.b.error ? ', ' + r.b.error + ' errors' : '') + (r.b.warn ? ', ' + r.b.warn + ' warnings' : '');
     });
     box.addEventListener('mouseleave', () => { cursor.hidden = tip.hidden = true; });
+    // Drag across the strip to show only that time range; double-click clears it.
+    const band = h('div', { class: 'drag', hidden: true });
+    box.append(band);
+    let drag = null;
+    box.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || !signalBucketAt(e.clientX)) return;
+      drag = { x0: e.clientX, moved: false, id: e.pointerId };
+    });
+    box.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      if (!drag.moved && Math.abs(e.clientX - drag.x0) < 5) return;
+      if (!drag.moved) { drag.moved = true; box.setPointerCapture(drag.id); box.classList.add('dragging'); }
+      const rect = box.getBoundingClientRect();
+      const a = Math.max(rect.left, Math.min(drag.x0, e.clientX)), b = Math.min(rect.right, Math.max(drag.x0, e.clientX));
+      band.hidden = false;
+      band.style.left = (a - rect.left) + 'px';
+      band.style.width = (b - a) + 'px';
+      const ra = signalBucketAt(a), rb = signalBucketAt(b - 1);
+      if (ra && rb) {
+        tip.hidden = false;
+        tip.textContent = Logs.formatTs(ra.b.start) + '  to  ' + Logs.formatTs(rb.b.start + rb.tl.size);
+      }
+    });
+    const endDrag = (e) => {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      box.classList.remove('dragging');
+      band.hidden = true;
+      if (!d.moved) return;
+      d.consumed = true;
+      suppressClick = true;
+      const rect = box.getBoundingClientRect();
+      const a = Math.max(rect.left, Math.min(d.x0, e.clientX)), b = Math.min(rect.right, Math.max(d.x0, e.clientX));
+      const ra = signalBucketAt(a), rb = signalBucketAt(b - 1);
+      if (!ra || !rb) return;
+      const from = ra.b.start;
+      const to = Math.ceil((rb.b.start + rb.tl.size) / 1000) * 1000 - 1;
+      setFilter({ from: Logs.formatTs(Math.floor(from / 1000) * 1000, true), to: Logs.formatTs(to, true) });
+      toast('Showing ' + Logs.formatTs(from) + ' to ' + Logs.formatTs(to + 1) + '. Double-click the strip to show all times again.', 3500);
+    };
+    let suppressClick = false;
+    box.addEventListener('pointerup', endDrag);
+    box.addEventListener('pointercancel', () => { drag = null; band.hidden = true; box.classList.remove('dragging'); });
+    box.addEventListener('dblclick', () => {
+      if (!active || !active.filter || (!active.filter.from && !active.filter.to)) return;
+      setFilter({ from: '', to: '' });
+      toast('Showing all times.', 1800);
+    });
     box.addEventListener('click', (e) => {
+      if (suppressClick) { suppressClick = false; return; }
       const r = signalBucketAt(e.clientX);
       if (!r || r.b.first < 0) return;
       const an = active.an;
@@ -1832,7 +1903,8 @@
         h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: settings.copilotMask, onchange: (e) => { settings.copilotMask = e.target.checked; saveSettings(); } }), 'Mask secrets in prompts'),
         h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: settings.copilotReview, onchange: (e) => { settings.copilotReview = e.target.checked; saveSettings(); } }), 'Review each prompt before sending'),
         h('div', { class: 'field' }, h('label', null, 'Copilot to use'), h('select', { onchange: (e) => { settings.copilotUrl = e.target.value; saveSettings(); if (copilotView) copilotView.setAttribute('src', e.target.value); } },
-          COPILOT_SITES.map(([u, l]) => h('option', { value: u, selected: settings.copilotUrl === u }, l))))),
+          COPILOT_SITES.map(([u, l]) => h('option', { value: u, selected: settings.copilotUrl === u }, l)))),
+        api.copilotSignOut ? h('button', { onclick: signOutCopilot, title: 'Forget the Copilot sign-in on this computer' }, 'Sign out of Copilot') : null),
       h('div', { class: 'group' }, h('h3', null, 'Secret masking'),
         h('p', { class: 'hint' }, 'Passwords, tokens, JWTs, API keys and private keys are always masked. Also mask:'),
         maskCheck('emails', 'Email addresses'), maskCheck('cards', 'Card numbers'), maskCheck('pan', 'PAN numbers'), maskCheck('ips', 'IP addresses')));
@@ -2068,6 +2140,8 @@
     v.innerHTML = '';
     const bar = null; // actions live in the editor's right-click menu; options in Appearance and settings
     const web = h('div', { class: 'cp-web' });
+    // Signed in before: go straight to Copilot (the sign-in is kept between restarts).
+    if (!copilotView && settings.cpStarted) loadCopilot();
     if (!copilotView) {
       web.style.background = 'transparent';
       const siteSel = h('select', { onchange: (e) => { settings.copilotUrl = e.target.value; saveSettings(); } },
@@ -2079,12 +2153,24 @@
           h('li', null, 'Select log lines (or just put the cursor on an error), right-click and pick an Ask Copilot action.'),
           h('li', null, 'TextForge masks secrets, shows you the prompt, then puts it in Copilot\'s message box. You press Enter.')),
         h('div', { class: 'field' }, h('label', null, 'Copilot to use'), siteSel),
-        h('button', { class: 'primary', onclick: () => { loadCopilot(); renderCopilot(); } }, 'Open Copilot and sign in'),
+        h('button', { class: 'primary', onclick: () => { settings.cpStarted = true; saveSettings(); loadCopilot(); renderCopilot(); } }, 'Open Copilot and sign in'),
         h('p', { class: 'hint', style: 'margin-top:12px' }, 'If your company only allows sign-in from managed browsers, use the open-in-browser button: prompts are copied to the clipboard so you can paste them in Edge.')));
     } else {
       web.append(copilotView);
     }
     v.append(...[bar, web].filter(Boolean));
+  }
+
+  async function signOutCopilot() {
+    const ok = await modal('Sign out of Copilot', '<p>TextForge will forget the Copilot sign-in on this computer. Next time you open Copilot you sign in again.</p>',
+      [{ label: 'Cancel', value: false }, { label: 'Sign out', value: true, primary: true }]);
+    if (!ok) return;
+    await api.copilotSignOut();
+    if (copilotView) { copilotView.remove(); copilotView = null; }
+    settings.cpStarted = false;
+    saveSettings();
+    if (document.body.classList.contains('cp-open')) renderCopilot();
+    toast('Signed out of Copilot.');
   }
 
   function loadCopilot() {

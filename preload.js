@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   clipboardWrite: (args) => ipcRenderer.invoke('clipboard:write', args),
   setTitle: (t) => ipcRenderer.invoke('win:title', t),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  copilotSignOut: () => ipcRenderer.invoke('copilot:signout'),
   pathForFile: (file) => webUtils.getPathForFile(file),
   onOpenPaths: (cb) => ipcRenderer.on('open-paths', (_e, paths) => cb(paths)),
   tailStart: (p) => ipcRenderer.invoke('tail:start', p),

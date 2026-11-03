@@ -155,3 +155,10 @@ SPLIT VIEW, DENSITY AND NEW ICON (0.8.0)
   The sidebar no longer opens by itself: click a rail button (or Ctrl+1/2/3) when you
   need it. Copilot lives on the round button (Alt+4); its rail button is gone.
   New app icon for the window, taskbar, exe and website.
+
+TIMELINE RANGE AND COPILOT SIGN-IN (0.8.1)
+  Drag across the timeline strip above a log to show only that time range (the rest
+  of the strip is dimmed, and From / To in Log insights fill in). Double-click the
+  strip to show all times again. A single click still jumps to that moment.
+  Copilot: after the first sign-in, the Copilot pane opens straight into Copilot on
+  every start. Appearance (Ctrl+,) > Copilot > "Sign out of Copilot" forgets it.
