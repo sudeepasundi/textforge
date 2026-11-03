@@ -71,7 +71,7 @@
     { label: 'Kafka positions', pattern: 'topic=[\\w.-]+|partition=\\d+|offset=\\d+', color: '#4fc1b0', ci: false, on: true },
   ];
   const defaults = {
-    theme: 'slate', accent: '#4c9aff', fontFamily: 'JetBrains Mono', fontSize: 14, lineHeight: 1.5, ligatures: false,
+    theme: 'slate', accent: '#4c9aff', density: 'comfortable', fontFamily: 'JetBrains Mono', fontSize: 14, lineHeight: 1.5, ligatures: false,
     wrap: false, whitespace: false, minimap: true, signal: true, pasteFormat: 'markdown', myPackages: 'com.example',
     rules: DEFAULT_RULES, groupWarn: false, mask: { emails: true, ips: false, cards: true, pan: true },
     copilotUrl: 'https://m365.cloud.microsoft/chat', copilotMask: true, copilotReview: true, sideWidth: 340, view: 'insights',
@@ -142,7 +142,8 @@
     };
     for (const k in vars) document.documentElement.style.setProperty('--' + k, vars[k]);
     document.documentElement.style.colorScheme = t.dark ? 'dark' : 'light';
-    if (api.setTitleBar) api.setTitleBar({ color: t.surface, symbolColor: t.muted });
+    applyDensity();
+    if (api.setTitleBar) api.setTitleBar({ color: t.surface, symbolColor: t.muted, height: barHeight() });
     if (!window.monaco) return;
     const c = (x) => x.replace('#', '');
     monaco.editor.defineTheme('tf', {
@@ -186,17 +187,26 @@
     if (active) { refreshDecorations(active); renderSignal(); }
   }
 
+  // Density: "compact" tightens the bars, tabs, rail, panels and editor line spacing.
+  function isCompact() { return settings.density === 'compact'; }
+  function barHeight() { return isCompact() ? 32 : 40; }
+  function applyDensity() {
+    document.body.classList.toggle('compact', isCompact());
+  }
+  function editorLineHeight() { return Math.round(settings.fontSize * (isCompact() ? Math.max(1.2, settings.lineHeight - 0.15) : settings.lineHeight)); }
+
   function applyEditorOptions() {
     if (!editor) return;
     editor.updateOptions({
       fontFamily: `'${settings.fontFamily}', 'JetBrains Mono', Consolas, monospace`,
       fontSize: settings.fontSize,
-      lineHeight: Math.round(settings.fontSize * settings.lineHeight),
+      lineHeight: editorLineHeight(),
       fontLigatures: settings.ligatures,
       wordWrap: settings.wrap ? 'on' : 'off',
       renderWhitespace: settings.whitespace ? 'all' : 'none',
       minimap: { enabled: settings.minimap },
     });
+    if (split) split.editor.updateOptions({ fontFamily: `'${settings.fontFamily}', 'JetBrains Mono', Consolas, monospace`, fontSize: settings.fontSize, lineHeight: editorLineHeight(), fontLigatures: settings.ligatures, wordWrap: settings.wrap ? 'on' : 'off' });
   }
 
   function updateRuleStyles() {
@@ -318,6 +328,7 @@
     return lang;
   }
 
+  let useClock = 1e9; // ordering for "most recently used" (tab ids are smaller)
   function newTab({ path, name, content = '', enc = 'utf8', dirty = false, lang }) {
     const tabName = name || (path ? basename(path) : 'Untitled ' + ++untitledCounter);
     const model = monaco.editor.createModel(content, lang || chooseLanguage(tabName, content));
@@ -325,6 +336,7 @@
       id: ++idCounter, path: path || null, name: tabName, model, enc, savedVersion: model.getAlternativeVersionId(),
       forceDirty: dirty, viewState: null, filter: emptyFilter(), an: null, decoIds: [], detectDone: !!content, tailing: false,
     };
+    tab.used = ++useClock;
     model.onDidChangeContent(() => onContentChanged(tab));
     tabs.push(tab);
     return tab;
@@ -351,6 +363,7 @@
   }, 500);
 
   function activate(tab) {
+    tab.used = ++useClock;
     if (active && active !== tab) active.viewState = editor.saveViewState();
     active = tab;
     editor.setModel(tab.model);
@@ -375,7 +388,7 @@
     bar.innerHTML = '';
     for (const t of tabs) {
       const el = h('div', {
-        class: 'tab' + (t === active ? ' active' : '') + (isDirty(t) ? ' dirty' : '') + (isLogTab(t) ? ' is-log' : ''),
+        class: 'tab' + (t === active ? ' active' : '') + (isDirty(t) ? ' dirty' : '') + (isLogTab(t) ? ' is-log' : '') + (split && split.tab === t && t !== active ? ' in-split' : ''),
         title: t.path || t.name, role: 'tab',
         onclick: () => activate(t),
         onauxclick: (e) => { if (e.button === 1) { e.preventDefault(); closeTab(t); } },
@@ -387,6 +400,7 @@
       if (t === active) setTimeout(() => el.scrollIntoView({ block: 'nearest', inline: 'nearest' }), 0);
     }
     updateTitle();
+    if (splitOpen()) renderSplitHead();
   }
 
   function updateTitle() {
@@ -403,11 +417,16 @@
     }
     if (tab.tailing) api.tailStop(tab.path);
     const idx = tabs.indexOf(tab);
+    if (split && split.tab === tab) { split.editor.setModel(null); split.tab = null; }
     tabs.splice(idx, 1);
     if (active === tab) {
       active = null;
       if (!tabs.length) newTab({});
       activate(tabs[Math.min(idx, tabs.length - 1)]);
+    }
+    if (split && !split.tab && !$('#split').hidden) {
+      const other = tabs.find((t) => t !== active);
+      if (other) setSplitTab(other); else closeSplit();
     }
     tab.model.dispose();
     renderTabs();
@@ -932,7 +951,7 @@
     if (editor) setTimeout(() => editor.layout(), 0);
   }
   async function pickCompare() {
-    const others = tabs.filter((t) => t !== active);
+    const others = tabs.filter((t) => t !== active && !isPristineUntitled(t));
     if (!others.length) { toast('Open another tab to compare with.'); return; }
     const sel = h('select', { style: 'width:100%' }, others.map((t, i) => h('option', { value: String(i) }, t.name)));
     const body = h('div', null, h('div', { class: 'field' }, h('label', null, 'Compare ' + active.name + ' with'), sel),
@@ -1785,6 +1804,13 @@
     v.append(
       h('div', { class: 'group' }, h('h3', null, 'Theme'), themes),
       h('div', { class: 'group' }, h('h3', null, 'Accent colour'), accents),
+      h('div', { class: 'group' }, h('h3', null, 'Density'),
+        h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Density' },
+          [['comfortable', 'Comfortable'], ['compact', 'Compact']].map(([val, label]) => h('button', {
+            class: settings.density === val ? 'on' : '', role: 'radio', 'aria-checked': String(settings.density === val),
+            onclick: () => { set('density', val); applyTheme(); applyEditorOptions(); if (editor) editor.layout(); renderAppearance(); },
+          }, label))),
+        h('p', { class: 'hint' }, 'Compact fits more on screen: smaller bars and tabs, and tighter line spacing in the editor.')),
       h('div', { class: 'group' }, h('h3', null, 'Editor text'),
         h('div', { class: 'field' }, h('label', null, 'Font'), h('select', { onchange: (e) => { set('fontFamily', e.target.value); applyEditorOptions(); } },
           fonts.map((f) => h('option', { value: f, selected: settings.fontFamily === f }, f)))),
@@ -2246,6 +2272,173 @@
   }
 
   // ======================================================================
+  // SPLIT VIEW: a second editor beside the main one, showing any open tab
+  // ======================================================================
+  // The right side can show another tab (or the same file at a different place). The two sides can
+  // scroll together by timestamp (two services' logs line up at the same moment) or by line number.
+  let split = null;
+  function splitOptions() {
+    return {
+      model: null, theme: 'tf', automaticLayout: true, largeFileOptimizations: false, scrollBeyondLastLine: false,
+      minimap: { enabled: false }, folding: true, showFoldingControls: 'mouseover', padding: { top: 8 }, renderLineHighlight: 'line',
+      fixedOverflowWidgets: true, stickyScroll: { enabled: false }, unicodeHighlight: { ambiguousCharacters: false },
+      fontFamily: `'${settings.fontFamily}', 'JetBrains Mono', Consolas, monospace`, fontSize: settings.fontSize,
+      lineHeight: editorLineHeight(), wordWrap: settings.wrap ? 'on' : 'off', fontLigatures: settings.ligatures,
+    };
+  }
+  function openSplit(tab) {
+    if (!split) {
+      const ed = monaco.editor.create($('#split-editor'), splitOptions());
+      split = { editor: ed, tab: null, mode: 'auto', lock: null };
+      ed.onDidScrollChange((e) => { if (e.scrollTopChanged) syncScroll(ed); });
+      editor.onDidScrollChange((e) => { if (e.scrollTopChanged) syncScroll(editor); });
+      ed.onDidFocusEditorText(() => { document.body.classList.add('split-focus'); });
+      ed.onDidBlurEditorText(() => { document.body.classList.remove('split-focus'); });
+    }
+    const others = tabs.filter((t) => t !== active && !isPristineUntitled(t));
+    const pool = isLogTab(active) && others.some(isLogTab) ? others.filter(isLogTab) : others;
+    const recent = pool.slice().sort((a, b) => (b.used || b.id) - (a.used || a.id))[0];
+    const pick = tab || (split.tab && tabs.includes(split.tab) && split.tab !== active ? split.tab : null) || recent || active;
+    $('#split').hidden = false;
+    document.body.classList.add('split-open');
+    $('#split').style.setProperty('--split-w', (settings.splitW || 50) + '%');
+    setSplitTab(pick);
+    if (pick === active) toast('Showing this tab on both sides: scroll each side to compare two places. Pick another tab at the top right.', 4500);
+  }
+  function setSplitTab(t) {
+    if (!split || !t) return;
+    split.tab = t;
+    split.editor.setModel(t.model);
+    renderSplitHead();
+    renderTabs();
+    syncScroll(editor, true);
+  }
+  function closeSplit() {
+    if (!split) return;
+    $('#split').hidden = true;
+    document.body.classList.remove('split-open', 'split-focus');
+    split.editor.setModel(null);
+    split.tab = null;
+    renderTabs();
+    setTimeout(() => editor.layout(), 0);
+    editor.focus();
+  }
+  const splitOpen = () => !!(split && split.tab && !$('#split').hidden);
+  function toggleSplit() { if (splitOpen()) closeSplit(); else openSplit(); }
+  function swapSplit() {
+    if (!splitOpen()) return;
+    const right = split.tab;
+    const left = active;
+    if (right === left) return;
+    activate(right);
+    setSplitTab(left);
+  }
+  function effectiveSyncMode() {
+    if (!split) return 'off';
+    if (split.mode !== 'auto') return split.mode;
+    const a = active && isLogTab(active) && active.an && active.an.timeline;
+    const b = split.tab && isLogTab(split.tab) && analyze(split.tab) && split.tab.an.timeline;
+    return a && b && active !== split.tab ? 'time' : active !== split.tab ? 'line' : 'off';
+  }
+  function renderSplitHead() {
+    if (!split) return;
+    const sel = $('#sp-tab');
+    sel.innerHTML = '';
+    tabs.forEach((t, i) => sel.append(h('option', { value: String(i), selected: t === split.tab }, t.name + (t === active ? '  (also on the left)' : ''))));
+    $('#sp-sync').value = effectiveSyncMode();
+  }
+  // first visible line -> timestamp of the entry it belongs to
+  function entryTsAt(tab, line0) {
+    const an = tab.an;
+    if (!an || !an.entries.length) return null;
+    let lo = 0, hi = an.entries.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (an.entries[mid].start <= line0) lo = mid; else hi = mid - 1; }
+    for (let i = lo; i >= 0 && i > lo - 50; i--) if (an.entries[i].ts != null) return an.entries[i].ts;
+    for (let i = lo; i < an.entries.length && i < lo + 50; i++) if (an.entries[i].ts != null) return an.entries[i].ts;
+    return null;
+  }
+  function lineAtTs(tab, ts) {
+    const an = tab.an;
+    if (!an) return null;
+    let best = null, bestD = Infinity;
+    // entries are mostly in time order: binary search, then look around for the closest
+    let lo = 0, hi = an.entries.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; const t = an.entries[mid].ts; if (t == null || t < ts) lo = mid + 1; else hi = mid; }
+    for (let i = Math.max(0, lo - 30); i < Math.min(an.entries.length, lo + 30); i++) {
+      const t = an.entries[i].ts;
+      if (t == null) continue;
+      const d = Math.abs(t - ts);
+      if (d < bestD) { bestD = d; best = an.entries[i].start; }
+    }
+    return best;
+  }
+  // First line whose top half is on screen (a sliver of the line above does not count).
+  function topFullLine(ed) {
+    const ranges = ed.getVisibleRanges();
+    if (!ranges.length) return 0;
+    let line = ranges[0].startLineNumber;
+    const lh = ed.getOption(monaco.editor.EditorOption.lineHeight);
+    const max = ed.getModel() ? ed.getModel().getLineCount() : line;
+    while (line < max && ed.getTopForLineNumber(line) < ed.getScrollTop() - lh / 2) line++;
+    return line;
+  }
+  function syncScroll(src, force) {
+    if (!splitOpen()) return;
+    // ignore the scroll events we cause on the other side (the side being scrolled always counts)
+    if (!force && split.lock && split.lock.ed === src && performance.now() < split.lock.until) return;
+    const mode = effectiveSyncMode();
+    if (mode === 'off') return;
+    const other = src === editor ? split.editor : editor;
+    const srcTab = src === editor ? active : split.tab;
+    const dstTab = src === editor ? split.tab : active;
+    if (!srcTab || !dstTab) return;
+    const top = topFullLine(src);
+    if (!top) return;
+    let target;
+    if (mode === 'line') target = top;
+    else {
+      if (!srcTab.an) analyze(srcTab);
+      if (!dstTab.an) analyze(dstTab);
+      const ts = entryTsAt(srcTab, top - 1);
+      if (ts == null) return;
+      const l0 = lineAtTs(dstTab, ts);
+      if (l0 == null) return;
+      target = l0 + 1;
+    }
+    split.lock = { ed: other, until: performance.now() + 120 };
+    other.setScrollTop(other.getTopForLineNumber(Math.max(1, target)) - 2);
+  }
+  function wireSplit() {
+    $('#sp-tab').onchange = (e) => setSplitTab(tabs[+e.target.value]);
+    $('#sp-sync').onchange = (e) => { split.mode = e.target.value; syncScroll(editor, true); };
+    $('#sp-swap').onclick = swapSplit;
+    $('#sp-close').onclick = closeSplit;
+    const g = $('#split-gutter');
+    g.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      g.setPointerCapture(e.pointerId);
+      const box = $('#work').getBoundingClientRect();
+      const move = (ev) => {
+        const stacked = window.innerWidth <= 760; // phones: the second pane sits below
+        const share = stacked ? (box.bottom - ev.clientY) / box.height : (box.right - ev.clientX) / box.width;
+        const pct = Math.max(20, Math.min(80, share * 100));
+        settings.splitW = Math.round(pct);
+        $('#split').style.setProperty('--split-w', pct + '%');
+      };
+      const up = () => { g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); saveSettings(); };
+      g.addEventListener('pointermove', move);
+      g.addEventListener('pointerup', up);
+    });
+    g.addEventListener('dblclick', () => { settings.splitW = 50; saveSettings(); $('#split').style.setProperty('--split-w', '50%'); });
+    g.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      settings.splitW = Math.max(20, Math.min(80, (settings.splitW || 50) + (e.key === 'ArrowLeft' ? 5 : -5)));
+      $('#split').style.setProperty('--split-w', settings.splitW + '%');
+      saveSettings();
+    });
+  }
+
+  // ======================================================================
   // CHANGED ON DISK: reload open files when another program changes them
   // ======================================================================
   // Every couple of seconds (and whenever the window gets focus) each open file is checked.
@@ -2556,6 +2749,8 @@
       ['Pretty-print JSON', 'Edit', '', prettyJson],
       ['Editor commands (sort lines, change case, …)', 'Edit', 'F1', () => { editor.focus(); editor.trigger('tf', 'editor.action.quickCommand'); }],
       ['Toggle word wrap', 'View', 'Alt+Z', actions.wrap],
+      [splitOpen() ? 'Close split view' : 'Split view: show another tab beside this one', 'View', 'Ctrl+\\', toggleSplit],
+      ...(splitOpen() ? [['Split view: swap sides', 'View', '', swapSplit]] : []),
       ['Toggle sidebar', 'View', 'Ctrl+B', () => (currentView ? hideSide() : showView(settings.view || 'insights', { toggle: false }))],
       ['Appearance and settings', 'View', 'Ctrl+,', () => showView('appearance', { toggle: false })],
       ['Keyboard shortcuts', 'Help', '', showHelp],
@@ -2684,8 +2879,9 @@
   const actions = {
     new: () => activate(newTab({})),
     open: openFiles,
-    save: () => active && saveTab(active),
-    saveAs: () => active && saveTab(active, true),
+    save: () => { const t = splitOpen() && split.editor.hasTextFocus() ? split.tab : active; return t && saveTab(t); },
+    saveAs: () => { const t = splitOpen() && split.editor.hasTextFocus() ? split.tab : active; return t && saveTab(t, true); },
+    split: () => toggleSplit(),
     close: () => active && closeTab(active),
     palette: openPalette,
     help: showHelp,
@@ -2729,6 +2925,7 @@
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyT') openTableView();
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyP') setPreview(!(active && active.preview));
     else if (ctrl && !e.shiftKey && k === ',') showView('appearance');
+    else if (ctrl && !e.shiftKey && (k === '\\' || e.code === 'Backslash')) toggleSplit();
     else if (ctrl && !e.shiftKey && k === 'b') { if (currentView) hideSide(); else showView(settings.view || 'insights'); }
     else if (ctrl && k === 'tab') cycleTab(e.shiftKey ? -1 : 1);
     else if (e.key === 'F8' && active && isLogTab(active)) jumpError(e.shiftKey ? -1 : 1);
@@ -2806,6 +3003,7 @@
     $('#panel-close').onclick = closePanel;
     wireSideResize();
     wireSignal();
+    wireSplit();
     wirePreview();
     wireCopilotPane();
     wireWelcome();
@@ -2853,8 +3051,7 @@
     startDiskWatch();
 
     await restoreSession();
-    // On small screens (phones, narrow windows) the editor gets the whole width; the sidebar opens on demand.
-    if (settings.view && settings.view !== 'copilot' && window.innerWidth >= 1000) showView(settings.view, { toggle: false });
+    // The sidebar opens only when asked for (rail buttons, Ctrl+1..3, Ctrl+B); the editor gets the whole width.
     // Hooks for the automated checklist (test/checklist.e2e.js).
     window.__tf = {
       get active() { return active; }, get tabs() { return tabs; }, setFilter, clearFilter, showView, askCopilot, openPalette, newTab, activate, treatAsLog,
@@ -2862,6 +3059,8 @@
       runCommand: (label) => { const c = commands().find((x) => x.label.toLowerCase().startsWith(label.toLowerCase())); if (!c) throw new Error('No command ' + label); return c.run(); },
     };
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
-    Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
+    Object.defineProperty(window.__tf, 'split', { get: () => split });
+    Object.defineProperty(window.__tf, 'editor', { get: () => editor });
+    Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, openSplit, closeSplit, swapSplit, topFullLine, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
   }
 })();

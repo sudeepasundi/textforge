@@ -3,12 +3,13 @@
 <head>
   <meta charset="utf-8">
   <title>TextForge</title>
+  <link rel="icon" href="assets/icon-small.svg" type="image/svg+xml">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header id="topbar">
     <div class="brand" title="TextForge">
-      <svg viewBox="0 0 24 24" class="brand-mark" aria-hidden="true"><path d="M2 13h4l2.5-7 4 13 3-9 2 3H22"/></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" class="brand-mark logo" aria-hidden="true"><defs><linearGradient id="tfb-tile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#243354"/><stop offset="1" stop-color="#0E1422"/></linearGradient><linearGradient id="tfb-pulse" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#4C9AFF"/><stop offset="1" stop-color="#8B73FF"/></linearGradient></defs><rect x="16" y="16" width="480" height="480" rx="112" fill="url(#tfb-tile)"/><rect x="18" y="18" width="476" height="476" rx="110" fill="none" stroke="#ffffff" stroke-opacity=".12" stroke-width="4"/><path d="M70 280h96l36-96 54 176 44-128 28 48h114" fill="none" stroke="url(#tfb-pulse)" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/><path d="M410 70l13 32 32 13-32 13-13 32-13-32-32-13 32-13z" fill="#FFB547"/></svg>
       <span>TextForge</span>
     </div>
     <div id="tabs" role="tablist"></div>
@@ -16,6 +17,7 @@
       <button class="icon-btn" data-act="new" title="New tab (Ctrl+N)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
       <button class="icon-btn" data-act="open" title="Open file (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
       <button class="icon-btn" data-act="save" title="Save (Ctrl+S)"><svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M7 3v5h8V3M7 21v-7h10v7"/></svg></button>
+      <button class="icon-btn" data-act="split" title="Split view: two tabs side by side (Ctrl+\)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg></button>
       <button id="palette-btn" data-act="palette" title="Search commands (Ctrl+Shift+P)">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <span>Search commands</span><kbd>Ctrl Shift P</kbd>
@@ -28,7 +30,6 @@
       <button class="rail-btn" data-view="insights" title="Log insights (Ctrl+1)"><svg viewBox="0 0 24 24"><path d="M2 12h4l3-8 4 16 3-8h6"/></svg></button>
       <button class="rail-btn" data-view="extract" title="Extract data (Ctrl+2)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg></button>
       <button class="rail-btn" data-view="highlight" title="Highlight rules (Ctrl+3)"><svg viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg></button>
-      <button class="rail-btn" data-view="copilot" title="Copilot (Ctrl+4)"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15v4M17 17h4"/></svg></button>
       <span class="rail-grow"></span>
       <button class="rail-btn" data-view="appearance" title="Appearance and settings (Ctrl+,)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></button>
       <button class="rail-btn" data-act="help" title="Keyboard shortcuts"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.2-2.5 3.9M12 17.5v.01"/></svg></button>
@@ -54,7 +55,7 @@
         <div id="editor"></div>
         <div id="welcome" hidden>
           <div class="wl-card">
-            <svg viewBox="0 0 24 24" class="wl-mark" aria-hidden="true"><path d="M2 13h4l2.5-7 4 13 3-9 2 3H22"/></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" class="wl-mark logo" aria-hidden="true"><defs><linearGradient id="tfw-tile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#243354"/><stop offset="1" stop-color="#0E1422"/></linearGradient><linearGradient id="tfw-page" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F4F7FF"/><stop offset="1" stop-color="#DCE5F7"/></linearGradient><linearGradient id="tfw-pulse" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3D8BFF"/><stop offset="1" stop-color="#7B61FF"/></linearGradient><radialGradient id="tfw-ember" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#FFE2A8"/><stop offset=".55" stop-color="#FFB547"/><stop offset="1" stop-color="#FF8A3D"/></radialGradient></defs><rect x="32" y="32" width="448" height="448" rx="104" fill="url(#tfw-tile)"/><rect x="33.5" y="33.5" width="445" height="445" rx="102.5" fill="none" stroke="#ffffff" stroke-opacity=".12" stroke-width="3"/><path d="M168 104h134l66 66v214a24 24 0 0 1-24 24H168a24 24 0 0 1-24-24V128a24 24 0 0 1 24-24z" fill="url(#tfw-page)"/><path d="M302 104v46a20 20 0 0 0 20 20h46z" fill="#B9C8E6"/><rect x="184" y="160" width="86" height="16" rx="8" fill="#A9BAD9"/><rect x="184" y="196" width="140" height="16" rx="8" fill="#A9BAD9"/><path d="M96 300h82l30-70 42 132 34-96 22 34h110" fill="none" stroke="url(#tfw-pulse)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/><path d="M404 92l12 30 30 12-30 12-12 30-12-30-30-12 30-12z" fill="url(#tfw-ember)"/></svg>
             <h1>Start with a log, a table or a chat</h1>
             <p>Paste anywhere with <kbd>Ctrl</kbd> <kbd>V</kbd>. Logs are detected, tables keep their columns.</p>
             <div class="wl-actions">
@@ -62,6 +63,25 @@
               <button data-wl="sample"><svg viewBox="0 0 24 24"><path d="M2 12h4l3-8 4 16 3-8h6"/></svg><span>Try the sample log</span></button>
               <button data-wl="palette"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search commands</span><kbd>Ctrl Shift P</kbd></button>
             </div>
+          </div>
+        </div>
+        <div id="split" hidden>
+          <div id="split-gutter" role="separator" aria-orientation="vertical" aria-label="Resize split view" tabindex="0"></div>
+          <div id="split-pane">
+            <div class="sp-head">
+              <select id="sp-tab" aria-label="Tab shown on the right"></select>
+              <label class="sp-sync" title="Scroll the two sides together"><span>Scroll together</span>
+                <select id="sp-sync" aria-label="Scroll together">
+                  <option value="time">by time</option>
+                  <option value="line">by line</option>
+                  <option value="off">off</option>
+                </select>
+              </label>
+              <span class="grow"></span>
+              <button class="icon-btn small" id="sp-swap" title="Swap sides"><svg viewBox="0 0 24 24"><path d="M7 7h13l-3-3M17 17H4l3 3"/></svg></button>
+              <button class="icon-btn small" id="sp-close" title="Close split view (Ctrl+\)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+            </div>
+            <div id="split-editor"></div>
           </div>
         </div>
         <div id="preview" hidden>

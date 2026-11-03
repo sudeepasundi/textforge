@@ -143,3 +143,15 @@ AUTO TABLES (0.7.0)
   The first 300,000 entries are used (about 2 s); the title says when a log is
   bigger. The specific extractors (response times, SQL, Kafka, custom regex, ...)
   are still in the same list.
+
+SPLIT VIEW, DENSITY AND NEW ICON (0.8.0)
+  Split view (Ctrl+\ or the split button in the top bar) shows another tab on the
+  right. Pick the tab at the top of the right side. "Scroll together" keeps both
+  sides in step: by time (two services' logs stay at the same moment), by line, or
+  off. Drag the divider to resize (double-click resets to half), and use the swap
+  button to swap sides. Ctrl+S saves the side you are typing in.
+  Appearance (Ctrl+,) > Density: Compact gives smaller bars, tabs and side rail, and
+  tighter editor lines.
+  The sidebar no longer opens by itself: click a rail button (or Ctrl+1/2/3) when you
+  need it. Copilot lives on the round button (Alt+4); its rail button is gone.
+  New app icon for the window, taskbar, exe and website.

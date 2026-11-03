@@ -95,6 +95,7 @@ function createWindow() {
     minHeight: 400,
     backgroundColor: '#1a2029',
     title: 'TextForge',
+    icon: path.join(__dirname, 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon-256.png'),
     // One title bar: TextForge's own top bar, with the system window buttons drawn over its right end
     // (Windows / Linux) or the traffic lights on the left (macOS).
     titleBarStyle: 'hidden',
@@ -216,9 +217,10 @@ ipcMain.handle('clipboard:write', (_e, { text, html }) => {
 ipcMain.handle('win:title', (_e, title) => { if (win) win.setTitle(title); });
 
 // Keep the system window buttons in the theme's colours.
-ipcMain.handle('win:titlebar', (_e, { color, symbolColor }) => {
+ipcMain.handle('win:titlebar', (_e, { color, symbolColor, height }) => {
   if (!win || process.platform === 'darwin' || typeof win.setTitleBarOverlay !== 'function') return false;
-  try { win.setTitleBarOverlay({ color, symbolColor, height: 40 }); return true; } catch { return false; }
+  const h = Math.max(28, Math.min(48, Math.round(height || 40)));
+  try { win.setTitleBarOverlay({ color, symbolColor, height: h }); return true; } catch { return false; }
 });
 
 ipcMain.handle('open-external', (_e, url) => {

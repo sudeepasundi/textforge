@@ -1,4 +1,6 @@
-# TextForge
+<p align="center"><img src="assets/icon-128.png" width="96" height="96" alt="TextForge icon"></p>
+
+<h1 align="center">TextForge</h1>
 
 A log-aware text editor for backend developers: a Notepad++-style editor that understands Spring Boot,
 Logback/Log4j, JSON, access and syslog logs, keeps pasted tables as tables, and builds tables from your
@@ -22,6 +24,9 @@ logs automatically.
   never overwritten.
 - **Microsoft 365 Copilot** opens in a side or floating pane in the desktop app (in a window on the web). It
   can explain an error, find the root cause or summarise a log, with secrets masked first.
+- **Split view (Ctrl+\\):** two tabs side by side, scrolling together by timestamp, so the gateway and
+  payment logs line up at the same moment, or by line number.
+- **Compact or comfortable density**, 6 themes and accent colours.
 - **Editor:** Monaco (the editor from VS Code), with tabs, find in all tabs, multi-cursor, column select,
   diff/compare, themes and accent colours, and session restore.
 
@@ -32,6 +37,11 @@ logs automatically.
 - **Windows:** download `TextForge-<version>-win-x64-portable.zip` from Releases, extract it to a folder you
   own and run `TextForge.exe`. The app is not code-signed yet, so Windows may warn before it opens. On a
   company laptop, ask IT to approve it.
+
+## Icons
+
+The icon sources are `assets/icon.svg` (large sizes) and `assets/icon-small.svg` (16–32 px). Run
+`node tools/make-icons.js` to regenerate the PNGs and the Windows `icon.ico`.
 
 ## Build from source
 

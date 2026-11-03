@@ -37,7 +37,8 @@ const bodyMarkup = indexHtml.slice(indexHtml.indexOf('<body>') + 6, indexHtml.in
 const sample = read('samples/order-service.log');
 const css = read('style.css');
 const scripts = ['tables.js', 'markdown.js', 'logs.js', 'web-api.js', 'renderer.js'];
-const ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#1a2029"/><path d="M8 35h10l6.5-17 10 34 7.5-23 5 8H56" fill="none" stroke="#4c9aff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const ICON_SVG = read('assets/icon.svg');
+const FAVICON_SVG = read('assets/icon-small.svg');
 
 fs.rmSync(OUT, { recursive: true, force: true });
 
@@ -50,10 +51,8 @@ copyDir(path.join(ROOT, 'samples'), path.join(SH, 'samples'));
 fs.writeFileSync(path.join(SH, 'style.css'), css);
 for (const s of scripts) fs.copyFileSync(path.join(ROOT, s), path.join(SH, s));
 fs.writeFileSync(path.join(SH, 'icon.svg'), ICON_SVG);
-for (const size of [192, 512]) {
-  const png = path.join(ROOT, 'build', `icon-${size}.png`);
-  if (fs.existsSync(png)) fs.copyFileSync(png, path.join(SH, `icon-${size}.png`));
-}
+fs.writeFileSync(path.join(SH, 'favicon.svg'), FAVICON_SVG);
+for (const size of [180, 192, 512]) fs.copyFileSync(path.join(ROOT, 'assets', `icon-${size}.png`), path.join(SH, `icon-${size}.png`));
 
 const manifest = {
   name: 'TextForge',
@@ -62,11 +61,11 @@ const manifest = {
   start_url: './',
   scope: './',
   display: 'standalone',
-  background_color: '#1a2029',
+  background_color: '#0e1422',
   theme_color: '#212833',
   icons: [
-    { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
-    { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
+    { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
     { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml' },
   ],
   file_handlers: [{ action: './', accept: { 'text/plain': ['.log', '.txt', '.out', '.json', '.csv', '.md', '.xml', '.yml', '.yaml', '.properties', '.sql', '.java'] } }],
@@ -81,7 +80,9 @@ const shHtml = `<!DOCTYPE html>
   <title>TextForge</title>
   <meta name="theme-color" content="#212833">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <meta name="description" content="TextForge: a log-aware text editor for backend developers. Auto tables from logs, table paste, live reload.">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -98,7 +99,7 @@ ${scripts.map((s) => `  <script src="${s}"></script>`).join('\n')}
 fs.writeFileSync(path.join(SH, 'index.html'), shHtml);
 
 // Service worker: precache the app shell, cache everything else (Monaco language files) on first use.
-const core = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icon.svg', ...scripts,
+const core = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'icon.svg', 'favicon.svg', ...scripts,
   ...listFiles(path.join(SH, 'fonts')).map((f) => 'fonts/' + f),
   'monaco/vs/loader.js', 'monaco/vs/editor/editor.main.js', 'monaco/vs/editor/editor.main.css', 'monaco/vs/base/worker/workerMain.js'];
 const hash = crypto.createHash('sha1');
