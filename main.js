@@ -178,6 +178,21 @@ ipcMain.handle('file:readFrom', (_e, p, offset) => {
 });
 ipcMain.handle('sample', () => readFileSafe(path.join(__dirname, 'samples', 'order-service.log')));
 
+// Rename a saved file in its own folder (the tab follows).
+ipcMain.handle('file:rename', (_e, { path: p, name }) => {
+  try {
+    if (!name || /[\\/:*?"<>|]/.test(name) || /^\.+$/.test(name)) return { ok: false, error: 'That name has characters a file name cannot use.' };
+    const target = path.join(path.dirname(p), name);
+    if (target === p) return { ok: true, path: p };
+    const sameFileOtherCase = target.toLowerCase() === p.toLowerCase();
+    if (!sameFileOtherCase && fs.existsSync(target)) return { ok: false, error: name + ' already exists in that folder.' };
+    fs.renameSync(p, target);
+    return { ok: true, path: target, moved: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('file:save', (_e, { path: p, content, enc }) => {
   try {
     fs.writeFileSync(p, encode(content, enc));

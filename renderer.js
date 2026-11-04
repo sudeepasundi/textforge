@@ -204,9 +204,9 @@
       fontLigatures: settings.ligatures,
       wordWrap: settings.wrap ? 'on' : 'off',
       renderWhitespace: settings.whitespace ? 'all' : 'none',
-      minimap: { enabled: settings.minimap },
+      minimap: { enabled: settings.minimap && !splitOpen() }, // panes are narrow: no minimap while split
     });
-    if (split) split.editor.updateOptions({ fontFamily: `'${settings.fontFamily}', 'JetBrains Mono', Consolas, monospace`, fontSize: settings.fontSize, lineHeight: editorLineHeight(), fontLigatures: settings.ligatures, wordWrap: settings.wrap ? 'on' : 'off' });
+    for (const ped of paneEditors()) ped.updateOptions({ fontFamily: `'${settings.fontFamily}', 'JetBrains Mono', Consolas, monospace`, fontSize: settings.fontSize, lineHeight: editorLineHeight(), fontLigatures: settings.ligatures, wordWrap: settings.wrap ? 'on' : 'off' });
   }
 
   function updateRuleStyles() {
@@ -385,13 +385,42 @@
 
   function renderTabs() {
     const bar = $('#tabs');
+    if (bar.querySelector('.tab-rename')) return; // don't rebuild while a name is being typed
     bar.innerHTML = '';
     for (const t of tabs) {
       const el = h('div', {
-        class: 'tab' + (t === active ? ' active' : '') + (isDirty(t) ? ' dirty' : '') + (isLogTab(t) ? ' is-log' : '') + (split && split.tab === t && t !== active ? ' in-split' : ''),
-        title: t.path || t.name, role: 'tab',
+        class: 'tab' + (t === active ? ' active' : '') + (isDirty(t) ? ' dirty' : '') + (isLogTab(t) ? ' is-log' : '') + (inSplit(t) && t !== active ? ' in-split' : ''),
+        title: (t.path && !/^(web|download):/.test(t.path) ? t.path : t.name) + '\nDouble-click to rename, drag to move',
+        role: 'tab', draggable: 'true', 'data-tab': String(t.id),
         onclick: () => activate(t),
+        ondblclick: (e) => { if (!e.target.closest('.x')) startRename(t); },
+        oncontextmenu: (e) => { e.preventDefault(); tabMenu(t, e.clientX, e.clientY); },
         onauxclick: (e) => { if (e.button === 1) { e.preventDefault(); closeTab(t); } },
+        ondragstart: (e) => {
+          e.dataTransfer.setData('application/x-textforge-tab', String(t.id));
+          e.dataTransfer.setData('text/plain', t.name);
+          e.dataTransfer.effectAllowed = 'move';
+          document.body.classList.add('tab-dragging');
+          dragTab = t;
+        },
+        ondragend: () => { document.body.classList.remove('tab-dragging'); dragTab = null; clearTabDropMarks(); hideSplitDrop(); },
+        ondragover: (e) => {
+          if (!dragTab) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const r = el.getBoundingClientRect();
+          const after = e.clientX > r.left + r.width / 2;
+          clearTabDropMarks();
+          if (dragTab !== t) el.classList.add(after ? 'drop-after' : 'drop-before');
+        },
+        ondragleave: () => el.classList.remove('drop-before', 'drop-after'),
+        ondrop: (e) => {
+          if (!dragTab) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const r = el.getBoundingClientRect();
+          moveTab(dragTab, t, e.clientX > r.left + r.width / 2);
+        },
       },
       h('span', { class: 'kind' }), h('span', { class: 'name' }, t.name),
       h('span', { class: 'x', title: 'Close (Ctrl+W)', html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
@@ -401,6 +430,129 @@
     }
     updateTitle();
     if (splitOpen()) renderSplitHead();
+  }
+
+  // ---------- reorder tabs by dragging ----------
+  let dragTab = null;
+  function clearTabDropMarks() { $$('#tabs .tab').forEach((x) => x.classList.remove('drop-before', 'drop-after')); }
+  function moveTab(t, target, after) {
+    clearTabDropMarks();
+    if (!t || t === target) return;
+    tabs.splice(tabs.indexOf(t), 1);
+    let i = target ? tabs.indexOf(target) : tabs.length - 1;
+    tabs.splice(after ? i + 1 : i, 0, t);
+    renderTabs();
+    scheduleSession();
+  }
+
+  // ---------- rename tabs (unsaved tabs too) ----------
+  const BAD_NAME = /[\\/:*?"<>|]/;
+  function startRename(t) {
+    const el = $(`#tabs .tab[data-tab="${t.id}"]`);
+    if (!el) return;
+    const nameEl = el.querySelector('.name');
+    const input = h('input', { class: 'tab-rename', value: t.name, spellcheck: false, 'aria-label': 'New name for ' + t.name });
+    nameEl.replaceWith(input);
+    el.draggable = false;
+    input.focus();
+    // select the name without the extension, like a file manager
+    const dot = t.name.lastIndexOf('.');
+    input.setSelectionRange(0, dot > 0 ? dot : t.name.length);
+    let done = false;
+    const finish = async (commit) => {
+      if (done) return;
+      done = true;
+      const value = input.value.trim();
+      input.remove();
+      if (commit && value && value !== t.name) await renameTab(t, value);
+      renderTabs();
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+    ['mousedown', 'click', 'dblclick'].forEach((ev) => input.addEventListener(ev, (e) => e.stopPropagation()));
+  }
+  async function renameTab(t, name) {
+    name = String(name).trim();
+    if (!name) return false;
+    if (BAD_NAME.test(name)) { toast('A file name cannot contain \\ / : * ? " < > |', 4000); return false; }
+    const old = t.name;
+    const onDisk = t.path && !/^download:/.test(t.path);
+    if (onDisk) {
+      if (t.tailing) await api.tailStop(t.path);
+      const r = await api.renameFile({ path: t.path, name });
+      if (!r.ok) { toast('Could not rename: ' + r.error, 6000); if (t.tailing) api.tailStart(t.path); return false; }
+      t.path = r.path;
+      t.stamp = null;
+      if (t.tailing) api.tailStart(t.path);
+      if (r.labelOnly) toast('Renamed the tab. This browser can\'t rename the file on disk, so Save as will use the new name.', 5000);
+      else toast('Renamed ' + old + ' to ' + name, 2200);
+    } else {
+      t.path = null;
+      toast('Renamed to ' + name + '. Save (Ctrl+S) will suggest this name.', 2600);
+    }
+    t.name = name;
+    // a new extension can mean a new language (.json, .log, .sql...)
+    const lang = langFromName(name);
+    if (lang !== 'plaintext' && lang !== t.model.getLanguageId()) { monaco.editor.setModelLanguage(t.model, lang); t.detectDone = true; scheduleAnalysis(t); }
+    renderTabs();
+    updateTitle();
+    updateStatus();
+    scheduleSession();
+    return true;
+  }
+
+  // ---------- tab right-click menu ----------
+  function tabMenu(t, x, y) {
+    closeMenu();
+    const others = tabs.filter((o) => o !== t);
+    const items = [
+      ['Rename', () => { activate(t); setTimeout(() => startRename(t), 0); }],
+      [inSplit(t) ? 'Remove from split view' : 'Show beside (split view)', () => (inSplit(t) ? removeSplitTab(t) : addSplitPane(t))],
+      null,
+      ['Move to the start', () => moveTab(t, tabs[0], false), tabs[0] === t],
+      ['Move to the end', () => moveTab(t, tabs[tabs.length - 1], true), tabs[tabs.length - 1] === t],
+      t.path && !/^(web|download):/.test(t.path) ? ['Copy file path', () => api.clipboardWrite({ text: t.path }).then(() => toast('Path copied.', 1500))] : null,
+      null,
+      ['Close', () => closeTab(t)],
+      ['Close other tabs', async () => { for (const o of others) if (!(await closeTab(o))) break; }, !others.length],
+    ];
+    const menu = h('div', { class: 'menu', role: 'menu' });
+    for (const it of items) {
+      if (it === null) { if (menu.lastChild && !menu.lastChild.classList.contains('sep')) menu.append(h('div', { class: 'sep' })); continue; }
+      const [label, run, disabled] = it;
+      menu.append(h('button', { role: 'menuitem', disabled: !!disabled, onclick: () => { closeMenu(); run(); } }, label));
+    }
+    document.body.append(menu);
+    const r = menu.getBoundingClientRect();
+    menu.style.left = Math.min(x, window.innerWidth - r.width - 6) + 'px';
+    menu.style.top = Math.min(y, window.innerHeight - r.height - 6) + 'px';
+    const firstBtn = menu.querySelector('button:not([disabled])');
+    if (firstBtn) firstBtn.focus();
+    setTimeout(() => {
+      document.addEventListener('mousedown', menuAway, true);
+      document.addEventListener('keydown', menuKey, true);
+    }, 0);
+  }
+  function menuAway(e) { if (!e.target.closest('.menu')) closeMenu(); }
+  function menuKey(e) {
+    const menu = $('.menu');
+    if (!menu) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const btns = $$('.menu button:not([disabled])');
+      const i = btns.indexOf(document.activeElement);
+      btns[(i + (e.key === 'ArrowDown' ? 1 : -1) + btns.length) % btns.length].focus();
+    }
+  }
+  function closeMenu() {
+    $$('.menu').forEach((m) => m.remove());
+    document.removeEventListener('mousedown', menuAway, true);
+    document.removeEventListener('keydown', menuKey, true);
   }
 
   function updateTitle() {
@@ -417,16 +569,12 @@
     }
     if (tab.tailing) api.tailStop(tab.path);
     const idx = tabs.indexOf(tab);
-    if (split && split.tab === tab) { split.editor.setModel(null); split.tab = null; }
+    removeSplitTab(tab);
     tabs.splice(idx, 1);
     if (active === tab) {
       active = null;
       if (!tabs.length) newTab({});
       activate(tabs[Math.min(idx, tabs.length - 1)]);
-    }
-    if (split && !split.tab && !$('#split').hidden) {
-      const other = tabs.find((t) => t !== active);
-      if (other) setSplitTab(other); else closeSplit();
     }
     tab.model.dispose();
     renderTabs();
@@ -1087,7 +1235,9 @@
 
   // ---------- hidden areas (filtering) ----------
   function applyHiddenAreas(tab) {
-    if (!editor || tab !== active || typeof editor.setHiddenAreas !== 'function') return;
+    if (!editor || typeof editor.setHiddenAreas !== 'function') return;
+    const eds = (tab === active ? [editor] : []).concat(split ? split.panes.filter((p) => p.tab === tab).map((p) => p.editor) : []);
+    if (!eds.length) return;
     const an = tab.an;
     const ranges = [];
     if (an && an.vis && an.vis.some((x) => x)) {
@@ -1107,7 +1257,7 @@
       const lastEnd = an.entries.length ? an.entries[an.entries.length - 1].end : -1;
       if (lastEnd >= 0 && lastEnd < an.lines.length - 1) ranges.push({ startLineNumber: lastEnd + 2, startColumn: 1, endLineNumber: an.lines.length, endColumn: 1 });
     }
-    editor.setHiddenAreas(ranges);
+    for (const ed of eds) ed.setHiddenAreas(ranges);
   }
 
   function setFilter(patch) {
@@ -1117,6 +1267,7 @@
     analyze(active);
     computeVisibility(active);
     applyHiddenAreas(active);
+    if (splitOpen()) for (const t of new Set(split.panes.map((p) => p.tab))) shareFilter(active, t);
     renderFilterBar();
     renderSignal();
     if (currentView === 'insights') updateInsights();
@@ -2358,11 +2509,13 @@
   }
 
   // ======================================================================
-  // SPLIT VIEW: a second editor beside the main one, showing any open tab
+  // SPLIT VIEW: up to three more panes beside the main editor, each showing any open tab
   // ======================================================================
-  // The right side can show another tab (or the same file at a different place). The two sides can
-  // scroll together by timestamp (two services' logs line up at the same moment) or by line number.
+  // Panes can scroll together by timestamp (several services' logs line up at the same moment) or
+  // by line. Filters and Ctrl+F search apply to every pane. Drag a tab into the editor to add it.
+  const MAX_PANES = 3;
   let split = null;
+  let paneSeq = 0;
   function splitOptions() {
     return {
       model: null, theme: 'tf', automaticLayout: true, largeFileOptimizations: false, scrollBeyondLastLine: false,
@@ -2372,66 +2525,202 @@
       lineHeight: editorLineHeight(), wordWrap: settings.wrap ? 'on' : 'off', fontLigatures: settings.ligatures,
     };
   }
-  function openSplit(tab) {
-    if (!split) {
-      const ed = monaco.editor.create($('#split-editor'), splitOptions());
-      split = { editor: ed, tab: null, mode: 'auto', lock: null };
-      ed.onDidScrollChange((e) => { if (e.scrollTopChanged) syncScroll(ed); });
-      editor.onDidScrollChange((e) => { if (e.scrollTopChanged) syncScroll(editor); });
-      ed.onDidFocusEditorText(() => { document.body.classList.add('split-focus'); });
-      ed.onDidBlurEditorText(() => { document.body.classList.remove('split-focus'); });
-    }
-    const others = tabs.filter((t) => t !== active && !isPristineUntitled(t));
-    const pool = isLogTab(active) && others.some(isLogTab) ? others.filter(isLogTab) : others;
-    const recent = pool.slice().sort((a, b) => (b.used || b.id) - (a.used || a.id))[0];
-    const pick = tab || (split.tab && tabs.includes(split.tab) && split.tab !== active ? split.tab : null) || recent || active;
-    $('#split').hidden = false;
-    document.body.classList.add('split-open');
-    $('#split').style.setProperty('--split-w', (settings.splitW || 50) + '%');
-    setSplitTab(pick);
-    if (pick === active) toast('Showing this tab on both sides: scroll each side to compare two places. Pick another tab at the top right.', 4500);
+  function ensureSplit() {
+    if (split) return split;
+    split = { panes: [], mode: 'auto', locks: new Map() };
+    editor.onDidScrollChange((e) => { if (e.scrollTopChanged) syncScroll(editor); });
+    wireFindMirror(editor);
+    return split;
   }
-  function setSplitTab(t) {
-    if (!split || !t) return;
-    split.tab = t;
-    split.editor.setModel(t.model);
+  const splitOpen = () => !!(split && split.panes.length);
+  const inSplit = (t) => !!(split && split.panes.some((p) => p.tab === t));
+  const paneEditors = () => (split ? split.panes.map((p) => p.editor) : []);
+  const tabOfEditor = (ed) => (ed === editor ? active : (split && (split.panes.find((p) => p.editor === ed) || {}).tab) || null);
+  function focusedTab() {
+    if (split) for (const p of split.panes) if (p.editor.hasTextFocus()) return p.tab;
+    return active;
+  }
+  function pickTabForPane() {
+    const shown = new Set([active, ...(split ? split.panes.map((p) => p.tab) : [])]);
+    const others = tabs.filter((t) => !shown.has(t) && !isPristineUntitled(t));
+    const pool = isLogTab(active) && others.some(isLogTab) ? others.filter(isLogTab) : others;
+    return pool.slice().sort((a, b) => (b.used || b.id) - (a.used || a.id))[0] || null;
+  }
+  // Same filter on every pane (the extract "these lines" filter belongs to one file and stays put).
+  function shareFilter(from, to) {
+    if (!from || !to || from === to || !isLogTab(to)) return;
+    const f = from.filter;
+    const keep = to.filter && to.filter.lines;
+    to.filter = Object.assign({}, f, { levels: new Set(f.levels), lines: keep || undefined });
+    if (!to.filter.lines) delete to.filter.lines;
+    analyze(to);
+    computeVisibility(to);
+    applyHiddenAreas(to);
+  }
+  function addSplitPane(tab, { replace } = {}) {
+    ensureSplit();
+    let t = tab || pickTabForPane();
+    if (!t) {
+      if (!split.panes.length) { t = active; toast('Showing this tab twice: scroll each side to compare two places. Open more files to compare them.', 4500); }
+      else { toast('Every open file is already shown. Open another file to add it.', 3500); return null; }
+    }
+    const existing = split.panes.find((p) => p.tab === t);
+    if (existing && !replace) { flashPane(existing); return existing; }
+    if (replace) { setPaneTab(replace, t); return replace; }
+    if (split.panes.length >= MAX_PANES) {
+      const last = split.panes[split.panes.length - 1];
+      toast('Up to ' + (MAX_PANES + 1) + ' files fit side by side, so ' + last.tab.name + ' was swapped out.', 3500);
+      setPaneTab(last, t);
+      return last;
+    }
+    const pane = { id: ++paneSeq, tab: null, weight: 1 };
+    const sel = h('select', { class: 'sp-tab', 'aria-label': 'File shown in this pane', onchange: (e) => setPaneTab(pane, tabs.find((x) => String(x.id) === e.target.value)) });
+    pane.sel = sel;
+    const body = h('div', { class: 'sp-editor' });
+    pane.el = h('div', { class: 'sp-pane', 'data-pane': String(pane.id) },
+      h('div', { class: 'sp-head' }, sel,
+        h('span', { class: 'grow' }),
+        h('button', { class: 'icon-btn small', title: 'Swap with the main editor', onclick: () => swapPane(pane), html: '<svg viewBox="0 0 24 24"><path d="M7 7h13l-3-3M17 17H4l3 3"/></svg>' }),
+        h('button', { class: 'icon-btn small', title: 'Close this pane', onclick: () => removePane(pane), html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>' })),
+      body);
+    const gutter = h('div', { class: 'sp-gutter', role: 'separator', tabindex: '0', 'aria-label': 'Resize panes', title: 'Drag to resize. Double-click to make all panes equal.' });
+    pane.gutter = gutter;
+    $('#split').append(gutter, pane.el);
+    pane.editor = monaco.editor.create(body, splitOptions());
+    pane.editor.onDidScrollChange((e) => { if (e.scrollTopChanged) syncScroll(pane.editor); });
+    pane.editor.onDidFocusEditorText(() => pane.el.classList.add('focused'));
+    pane.editor.onDidBlurEditorText(() => pane.el.classList.remove('focused'));
+    wireFindMirror(pane.editor);
+    wireGutter(gutter, pane);
+    split.panes.push(pane);
+    showSplit();
+    setPaneTab(pane, t);
+    equalizePanes();
+    return pane;
+  }
+  function setPaneTab(pane, t) {
+    if (!pane || !t) return;
+    pane.tab = t;
+    pane.editor.setModel(t.model);
+    shareFilter(active, t);
+    applyHiddenAreas(t);
     renderSplitHead();
     renderTabs();
     syncScroll(editor, true);
   }
+  function removePane(pane) {
+    if (!split) return;
+    const i = split.panes.indexOf(pane);
+    if (i < 0) return;
+    split.panes.splice(i, 1);
+    pane.editor.dispose();
+    pane.el.remove();
+    pane.gutter.remove();
+    if (!split.panes.length) { closeSplit(); return; }
+    equalizePanes();
+    renderSplitHead();
+    renderTabs();
+  }
+  function removeSplitTab(t) { if (split) split.panes.filter((p) => p.tab === t).forEach(removePane); }
+  function showSplit() {
+    $('#split').hidden = false;
+    document.body.classList.add('split-open');
+    applyEditorOptions();
+  }
   function closeSplit() {
     if (!split) return;
+    for (const p of split.panes.slice()) { p.editor.dispose(); p.el.remove(); p.gutter.remove(); }
+    split.panes = [];
     $('#split').hidden = true;
-    document.body.classList.remove('split-open', 'split-focus');
-    split.editor.setModel(null);
-    split.tab = null;
+    document.body.classList.remove('split-open');
+    applyEditorOptions();
     renderTabs();
     setTimeout(() => editor.layout(), 0);
     editor.focus();
   }
-  const splitOpen = () => !!(split && split.tab && !$('#split').hidden);
-  function toggleSplit() { if (splitOpen()) closeSplit(); else openSplit(); }
-  function swapSplit() {
-    if (!splitOpen()) return;
-    const right = split.tab;
+  function toggleSplit() { if (splitOpen()) closeSplit(); else addSplitPane(); }
+  function swapPane(pane) {
+    pane = pane || (split && split.panes[0]);
+    if (!pane || pane.tab === active) return;
     const left = active;
-    if (right === left) return;
-    activate(right);
-    setSplitTab(left);
+    activate(pane.tab);
+    setPaneTab(pane, left);
+  }
+  const swapSplit = () => swapPane();
+  function flashPane(pane) {
+    pane.el.classList.remove('flash');
+    void pane.el.offsetWidth;
+    pane.el.classList.add('flash');
+  }
+  // every file gets the same width; the main editor is one of them
+  function equalizePanes() {
+    if (!split) return;
+    const n = split.panes.length;
+    split.panes.forEach((p) => { p.weight = 1; p.el.style.flexGrow = '1'; });
+    $('#split').style.setProperty('--split-w', ((n / (n + 1)) * 100) + '%');
+    split.panes.forEach((p, i) => p.gutter.classList.toggle('outer', i === 0));
+  }
+  function wireGutter(g, pane) {
+    g.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      g.setPointerCapture(e.pointerId);
+      const stacked = window.innerWidth <= 760;
+      const work = $('#work').getBoundingClientRect();
+      const i = split.panes.indexOf(pane);
+      const prev = split.panes[i - 1];
+      const move = (ev) => {
+        if (i === 0) {
+          // the divider between the main editor and the panes
+          const share = stacked ? (work.bottom - ev.clientY) / work.height : (work.right - ev.clientX) / work.width;
+          const min = 0.15 * split.panes.length;
+          $('#split').style.setProperty('--split-w', (Math.max(min, Math.min(0.85, share)) * 100) + '%');
+        } else {
+          // between two panes: share their space
+          const a = prev.el.getBoundingClientRect(), b = pane.el.getBoundingClientRect();
+          const total = stacked ? a.height + b.height : a.width + b.width;
+          const pos = stacked ? ev.clientY - a.top : ev.clientX - a.left;
+          const fa = Math.max(0.15, Math.min(0.85, pos / total));
+          const sum = prev.weight + pane.weight;
+          prev.weight = sum * fa; pane.weight = sum * (1 - fa);
+          prev.el.style.flexGrow = String(prev.weight); pane.el.style.flexGrow = String(pane.weight);
+        }
+      };
+      const up = () => { g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); };
+      g.addEventListener('pointermove', move);
+      g.addEventListener('pointerup', up);
+    });
+    g.addEventListener('dblclick', equalizePanes);
+    g.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const cur = parseFloat(getComputedStyle($('#split')).getPropertyValue('--split-w')) || 50;
+      $('#split').style.setProperty('--split-w', Math.max(15, Math.min(85, cur + (e.key === 'ArrowLeft' ? 5 : -5))) + '%');
+    });
   }
   function effectiveSyncMode() {
     if (!split) return 'off';
     if (split.mode !== 'auto') return split.mode;
-    const a = active && isLogTab(active) && active.an && active.an.timeline;
-    const b = split.tab && isLogTab(split.tab) && analyze(split.tab) && split.tab.an.timeline;
-    return a && b && active !== split.tab ? 'time' : active !== split.tab ? 'line' : 'off';
+    const timed = (t) => t && isLogTab(t) && analyze(t) && t.an.timeline;
+    const all = [active, ...split.panes.map((p) => p.tab)];
+    const distinct = new Set(all).size === all.length;
+    if (all.every(timed) && distinct) return 'time';
+    return distinct ? 'line' : 'off';
   }
   function renderSplitHead() {
     if (!split) return;
-    const sel = $('#sp-tab');
-    sel.innerHTML = '';
-    tabs.forEach((t, i) => sel.append(h('option', { value: String(i), selected: t === split.tab }, t.name + (t === active ? '  (also on the left)' : ''))));
-    $('#sp-sync').value = effectiveSyncMode();
+    split.panes.forEach((pane, i) => {
+      pane.sel.innerHTML = '';
+      tabs.forEach((t) => pane.sel.append(h('option', { value: String(t.id), selected: t === pane.tab }, t.name + (t === active ? '  (main editor)' : ''))));
+      const head = pane.el.querySelector('.sp-head');
+      let sync = head.querySelector('.sp-sync');
+      if (i === 0 && !sync) {
+        sync = h('label', { class: 'sp-sync', title: 'Scroll all panes together' }, h('span', null, 'Scroll together'),
+          h('select', { 'aria-label': 'Scroll together', onchange: (e) => { split.mode = e.target.value; syncScroll(editor, true); } },
+            h('option', { value: 'time' }, 'by time'), h('option', { value: 'line' }, 'by line'), h('option', { value: 'off' }, 'off')));
+        pane.sel.after(sync);
+      } else if (i > 0 && sync) sync.remove();
+      if (i === 0) sync.querySelector('select').value = effectiveSyncMode();
+    });
   }
   // first visible line -> timestamp of the entry it belongs to
   function entryTsAt(tab, line0) {
@@ -2447,12 +2736,12 @@
     const an = tab.an;
     if (!an) return null;
     let best = null, bestD = Infinity;
-    // entries are mostly in time order: binary search, then look around for the closest
     let lo = 0, hi = an.entries.length - 1;
     while (lo < hi) { const mid = (lo + hi) >> 1; const t = an.entries[mid].ts; if (t == null || t < ts) lo = mid + 1; else hi = mid; }
     for (let i = Math.max(0, lo - 30); i < Math.min(an.entries.length, lo + 30); i++) {
       const t = an.entries[i].ts;
       if (t == null) continue;
+      if (an.vis && !an.vis[i]) continue; // land on an entry the filter shows
       const d = Math.abs(t - ts);
       if (d < bestD) { bestD = d; best = an.entries[i].start; }
     }
@@ -2470,59 +2759,92 @@
   }
   function syncScroll(src, force) {
     if (!splitOpen()) return;
-    // ignore the scroll events we cause on the other side (the side being scrolled always counts)
-    if (!force && split.lock && split.lock.ed === src && performance.now() < split.lock.until) return;
+    // ignore the scroll events we cause on the other editors (the one being scrolled always counts)
+    const lock = split.locks.get(src);
+    if (!force && lock && performance.now() < lock) return;
     const mode = effectiveSyncMode();
     if (mode === 'off') return;
-    const other = src === editor ? split.editor : editor;
-    const srcTab = src === editor ? active : split.tab;
-    const dstTab = src === editor ? split.tab : active;
-    if (!srcTab || !dstTab) return;
+    const srcTab = tabOfEditor(src);
+    if (!srcTab) return;
     const top = topFullLine(src);
     if (!top) return;
-    let target;
-    if (mode === 'line') target = top;
-    else {
+    let ts = null;
+    if (mode === 'time') {
       if (!srcTab.an) analyze(srcTab);
-      if (!dstTab.an) analyze(dstTab);
-      const ts = entryTsAt(srcTab, top - 1);
+      ts = entryTsAt(srcTab, top - 1);
       if (ts == null) return;
-      const l0 = lineAtTs(dstTab, ts);
-      if (l0 == null) return;
-      target = l0 + 1;
     }
-    split.lock = { ed: other, until: performance.now() + 120 };
-    other.setScrollTop(other.getTopForLineNumber(Math.max(1, target)) - 2);
+    for (const other of [editor, ...paneEditors()]) {
+      if (other === src) continue;
+      const dstTab = tabOfEditor(other);
+      if (!dstTab) continue;
+      let target = top;
+      if (mode === 'time') {
+        if (!dstTab.an) analyze(dstTab);
+        const l0 = lineAtTs(dstTab, ts);
+        if (l0 == null) continue;
+        target = l0 + 1;
+      }
+      split.locks.set(other, performance.now() + 120);
+      other.setScrollTop(other.getTopForLineNumber(Math.max(1, target)) - 2);
+    }
   }
-  function wireSplit() {
-    $('#sp-tab').onchange = (e) => setSplitTab(tabs[+e.target.value]);
-    $('#sp-sync').onchange = (e) => { split.mode = e.target.value; syncScroll(editor, true); };
-    $('#sp-swap').onclick = swapSplit;
-    $('#sp-close').onclick = closeSplit;
-    const g = $('#split-gutter');
-    g.addEventListener('pointerdown', (e) => {
+  // Ctrl+F in any pane searches every pane for the same text (same options).
+  let mirroringFind = false;
+  function wireFindMirror(ed) {
+    const ctrl = ed.getContribution('editor.contrib.findController');
+    if (!ctrl || !ctrl.getState) return;
+    ctrl.getState().onFindReplaceStateChange((e) => {
+      if (mirroringFind || !splitOpen()) return;
+      if (!(e.searchString || e.isRegex || e.matchCase || e.wholeWord || e.isRevealed)) return;
+      const st = ctrl.getState();
+      mirroringFind = true;
+      try {
+        for (const other of [editor, ...paneEditors()]) {
+          if (other === ed) continue;
+          const oc = other.getContribution('editor.contrib.findController');
+          if (!oc) continue;
+          if (!st.isRevealed) { oc.closeFindWidget(); continue; }
+          if (!oc.getState().isRevealed) oc.start({ forceRevealReplace: false, seedSearchStringFromSelection: 'none', seedSearchStringFromNonEmptySelection: false, seedSearchStringFromGlobalClipboard: false, shouldFocus: 0, shouldAnimate: false, updateSearchScope: false, loop: true });
+          oc.getState().change({ searchString: st.searchString, isRegex: st.isRegex, matchCase: st.matchCase, wholeWord: st.wholeWord }, false);
+        }
+      } finally { mirroringFind = false; }
+    });
+  }
+  // Drag a tab into the editor area: on the main editor it opens beside; on a pane it replaces that pane.
+  function wireSplitDrop() {
+    const work = $('#work');
+    const drop = $('#split-drop');
+    const where = (e) => {
+      if (split) for (const p of split.panes) { const r = p.el.getBoundingClientRect(); if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return p; }
+      return null;
+    };
+    work.addEventListener('dragover', (e) => {
+      if (!dragTab) return;
       e.preventDefault();
-      g.setPointerCapture(e.pointerId);
-      const box = $('#work').getBoundingClientRect();
-      const move = (ev) => {
-        const stacked = window.innerWidth <= 760; // phones: the second pane sits below
-        const share = stacked ? (box.bottom - ev.clientY) / box.height : (box.right - ev.clientX) / box.width;
-        const pct = Math.max(20, Math.min(80, share * 100));
-        settings.splitW = Math.round(pct);
-        $('#split').style.setProperty('--split-w', pct + '%');
-      };
-      const up = () => { g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); saveSettings(); };
-      g.addEventListener('pointermove', move);
-      g.addEventListener('pointerup', up);
+      e.dataTransfer.dropEffect = 'move';
+      const pane = where(e);
+      const full = split && split.panes.length >= MAX_PANES && !pane;
+      const box = (pane ? pane.el : $('#editor')).getBoundingClientRect();
+      const wr = work.getBoundingClientRect();
+      drop.hidden = false;
+      drop.style.left = (box.left - wr.left) + 'px'; drop.style.top = (box.top - wr.top) + 'px';
+      drop.style.width = box.width + 'px'; drop.style.height = box.height + 'px';
+      drop.querySelector('span').textContent = pane ? 'Drop to show ' + dragTab.name + ' here' : full ? 'Up to ' + (MAX_PANES + 1) + ' files side by side' : 'Drop to show ' + dragTab.name + ' beside';
     });
-    g.addEventListener('dblclick', () => { settings.splitW = 50; saveSettings(); $('#split').style.setProperty('--split-w', '50%'); });
-    g.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      settings.splitW = Math.max(20, Math.min(80, (settings.splitW || 50) + (e.key === 'ArrowLeft' ? 5 : -5)));
-      $('#split').style.setProperty('--split-w', settings.splitW + '%');
-      saveSettings();
+    work.addEventListener('dragleave', (e) => { if (!work.contains(e.relatedTarget)) hideSplitDrop(); });
+    work.addEventListener('drop', (e) => {
+      if (!dragTab) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const t = dragTab;
+      const pane = where(e);
+      hideSplitDrop();
+      if (pane) addSplitPane(t, { replace: pane });
+      else addSplitPane(t);
     });
   }
+  function hideSplitDrop() { const d = $('#split-drop'); if (d) d.hidden = true; }
 
   // ======================================================================
   // CHANGED ON DISK: reload open files when another program changes them
@@ -2647,9 +2969,59 @@
   // ======================================================================
   // BOTTOM PANEL (table view, find in tabs, extract results)
   // ======================================================================
+  // ---------- panel size: drag the top edge, double-click to reset, maximise button ----------
+  const PANEL_DEFAULT = () => (window.innerWidth <= 760 ? Math.round(window.innerHeight * 0.45) : 300);
+  function panelLimits() {
+    const body = $('#body').getBoundingClientRect();
+    return { min: 120, max: Math.max(160, Math.round(body.height - 90)) };
+  }
+  function setPanelHeight(px, save = true) {
+    const { min, max } = panelLimits();
+    const hgt = Math.round(Math.max(min, Math.min(max, px)));
+    $('#panel').style.height = hgt + 'px';
+    $('#panel').classList.toggle('maxed', hgt >= max - 2);
+    if (save) { settings.panelH = hgt; saveSettings(); }
+    $('#cp-fab').style.bottom = (hgt + 18) + 'px';
+    if (editor) editor.layout();
+    return hgt;
+  }
+  function togglePanelMax() {
+    const p = $('#panel');
+    if (p.hidden) return;
+    const { max } = panelLimits();
+    if (p.classList.contains('maxed')) setPanelHeight(settings.panelRestoreH || PANEL_DEFAULT());
+    else { settings.panelRestoreH = p.offsetHeight; setPanelHeight(max); }
+  }
+  function wirePanelResize() {
+    const g = $('#panel-grip');
+    g.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      g.setPointerCapture(e.pointerId);
+      const startY = e.clientY, startH = $('#panel').offsetHeight;
+      document.body.classList.add('panel-resizing');
+      const move = (ev) => setPanelHeight(startH + (startY - ev.clientY), false);
+      const up = () => {
+        g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up);
+        document.body.classList.remove('panel-resizing');
+        setPanelHeight($('#panel').offsetHeight);
+      };
+      g.addEventListener('pointermove', move);
+      g.addEventListener('pointerup', up);
+    });
+    g.addEventListener('dblclick', () => setPanelHeight(PANEL_DEFAULT()));
+    g.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); setPanelHeight($('#panel').offsetHeight + (e.key === 'ArrowUp' ? 30 : -30)); }
+    });
+    $('#panel-max').onclick = togglePanelMax;
+    window.addEventListener('resize', debounce(() => { if (!$('#panel').hidden) setPanelHeight($('#panel').offsetHeight, false); }, 150));
+  }
+
   function openPanel(mode, title) {
     panelMode = mode;
+    const wasHidden = $('#panel').hidden;
     $('#panel').hidden = false;
+    if (wasHidden) setPanelHeight(settings.panelH || PANEL_DEFAULT(), false);
     $('#cp-fab').style.bottom = ($('#panel').offsetHeight + 18) + 'px';
     $('#panel-title').textContent = title;
     $('#panel-tools').innerHTML = '';
@@ -2836,7 +3208,8 @@
       ['Editor commands (sort lines, change case, …)', 'Edit', 'F1', () => { editor.focus(); editor.trigger('tf', 'editor.action.quickCommand'); }],
       ['Toggle word wrap', 'View', 'Alt+Z', actions.wrap],
       [splitOpen() ? 'Close split view' : 'Split view: show another tab beside this one', 'View', 'Ctrl+\\', toggleSplit],
-      ...(splitOpen() ? [['Split view: swap sides', 'View', '', swapSplit]] : []),
+      ...(splitOpen() ? [['Split view: add another tab', 'View', '', () => addSplitPane()], ['Split view: swap the first pane with the main editor', 'View', '', swapSplit]] : []),
+      ['Rename tab', 'File', 'double-click a tab', () => active && startRename(active)],
       ['Toggle sidebar', 'View', 'Ctrl+B', () => (currentView ? hideSide() : showView(settings.view || 'insights', { toggle: false }))],
       ['Appearance and settings', 'View', 'Ctrl+,', () => showView('appearance', { toggle: false })],
       ['Keyboard shortcuts', 'Help', '', showHelp],
@@ -2965,8 +3338,8 @@
   const actions = {
     new: () => activate(newTab({})),
     open: openFiles,
-    save: () => { const t = splitOpen() && split.editor.hasTextFocus() ? split.tab : active; return t && saveTab(t); },
-    saveAs: () => { const t = splitOpen() && split.editor.hasTextFocus() ? split.tab : active; return t && saveTab(t, true); },
+    save: () => { const t = focusedTab(); return t && saveTab(t); },
+    saveAs: () => { const t = focusedTab(); return t && saveTab(t, true); },
     split: () => toggleSplit(),
     close: () => active && closeTab(active),
     palette: openPalette,
@@ -3012,6 +3385,7 @@
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyP') setPreview(!(active && active.preview));
     else if (ctrl && !e.shiftKey && k === ',') showView('appearance');
     else if (ctrl && !e.shiftKey && (k === '\\' || e.code === 'Backslash')) toggleSplit();
+    else if (ctrl && e.shiftKey && (k === 'm' || k === 'M')) togglePanelMax();
     else if (ctrl && !e.shiftKey && k === 'b') { if (currentView) hideSide(); else showView(settings.view || 'insights'); }
     else if (ctrl && k === 'tab') cycleTab(e.shiftKey ? -1 : 1);
     else if (e.key === 'F8' && active && isLogTab(active)) jumpError(e.shiftKey ? -1 : 1);
@@ -3089,7 +3463,8 @@
     $('#panel-close').onclick = closePanel;
     wireSideResize();
     wireSignal();
-    wireSplit();
+    wireSplitDrop();
+    wirePanelResize();
     wirePreview();
     wireCopilotPane();
     wireWelcome();
@@ -3128,6 +3503,7 @@
     document.addEventListener('dragover', (e) => e.preventDefault());
     document.addEventListener('drop', (e) => {
       e.preventDefault();
+      if (dragTab || Array.from(e.dataTransfer.types || []).includes('application/x-textforge-tab')) return; // a tab being moved, not a file
       if (api.dropPaths) { api.dropPaths(e.dataTransfer).then((paths) => { if (paths.length) openPaths(paths); }); return; }
       const paths = Array.from(e.dataTransfer.files).map((f) => api.pathForFile(f)).filter(Boolean);
       if (paths.length) openPaths(paths);
@@ -3147,6 +3523,6 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
-    Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, openSplit, closeSplit, swapSplit, topFullLine, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
+    Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
   }
 })();

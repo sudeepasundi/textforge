@@ -1,7 +1,7 @@
 {
   "name": "textforge",
   "productName": "TextForge",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "A log-aware text editor for backend developers",
   "main": "main.js",
   "scripts": {
@@ -14,7 +14,8 @@
     "test:auto": "node test/autotables.e2e.js",
     "package:win": "electron-packager . TextForge --platform=win32 --arch=x64 --out=dist --overwrite --prune=true --icon=assets/icon.ico --app-copyright=\"Copyright (c) 2026 NUKE\" --win32metadata.CompanyName=\"TextForge\" --win32metadata.ProductName=\"TextForge\" --win32metadata.FileDescription=\"TextForge - log-aware text editor\" --win32metadata.InternalName=\"TextForge\" --ignore=\"^/(test|dist|web-dist|build|packaging|tools|\\.github)($|/)\" --ignore=\"^/(build-web|web-api)\\.js$\" --ignore=\"/node_modules/monaco-editor/(esm|dev|min-maps)($|/)\"",
     "build:web": "node build-web.js",
-    "test:layout": "node test/layout.e2e.js"
+    "test:layout": "node test/layout.e2e.js",
+    "test:workspace": "node test/workspace.e2e.js"
   },
   "dependencies": {
     "monaco-editor": "^0.52.0"

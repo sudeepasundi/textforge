@@ -39,7 +39,7 @@ for (let i = 0; i < 60; i++) {
   await page.click('.at-item:has-text("Heartbeat")');
   const want = await page.evaluate(() => +document.querySelector('.at-main td.ln').textContent);
   await page.click('.at-main td.ln');
-  r = await page.evaluate(() => document.querySelector('.monaco-editor .current-line') ? +document.querySelector('.line-numbers.active-line-number')?.textContent : null);
+  r = await page.evaluate(() => __tf.editor.getPosition().lineNumber);
   ok('Clicking a line number jumps to it in the log', r === want, 'line ' + r + ' (wanted ' + want + ')');
   await page.evaluate(() => __tf.runCommand('Find duplicate'));
   await page.waitForTimeout(300);

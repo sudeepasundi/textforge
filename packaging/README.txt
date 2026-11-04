@@ -162,3 +162,17 @@ TIMELINE RANGE AND COPILOT SIGN-IN (0.8.1)
   strip to show all times again. A single click still jumps to that moment.
   Copilot: after the first sign-in, the Copilot pane opens straight into Copilot on
   every start. Appearance (Ctrl+,) > Copilot > "Sign out of Copilot" forgets it.
+
+TABS, SPLIT VIEW AND RESULTS PANEL (0.9.0)
+  Tabs: double-click a tab to rename it (Enter to keep, Esc to cancel). It works for
+  unsaved tabs too: Save then suggests the new name. A saved file is renamed in its
+  folder; an existing file is never overwritten. Drag tabs to change their order.
+  Right-click a tab for Rename, Show beside, Move, Copy file path, Close and Close
+  other tabs.
+  Split view now holds up to 4 files: drag a tab onto the editor to add it beside, or
+  onto a pane to show it there instead. Each pane has its own file list, swap and
+  close buttons, and the dividers can be dragged. Filters (levels, text, logger,
+  trace IDs, time range, including a range dragged on the timeline) and Ctrl+F
+  search apply to every pane. "Scroll together" keeps every pane at the same time.
+  Results panel (tables, counts, duplicates): drag its top edge to resize it,
+  double-click the edge to reset, or use the expand button (Ctrl+Shift+M).

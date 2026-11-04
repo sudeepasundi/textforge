@@ -155,6 +155,26 @@
     return readPicked(await pickWithInput());
   }
 
+  // Rename: files picked with a handle are renamed on disk where the browser supports it;
+  // otherwise only the tab is renamed and "Save as" suggests the new name.
+  async function renameFile({ path: p, name }) {
+    if (!name || /[\\/:*?"<>|]/.test(name)) return { ok: false, error: 'That name has characters a file name cannot use.' };
+    const m = /^(web:\d+)\/(.*)$/.exec(p || '');
+    const np = m ? m[1] + '/' + name : pseudo(name);
+    const h = handles.get(p);
+    let moved = false;
+    if (h && typeof h.move === 'function') {
+      try {
+        if (h.requestPermission && (await h.requestPermission({ mode: 'readwrite' })) !== 'granted') throw new Error('no permission');
+        await h.move(name);
+        moved = true;
+      } catch { moved = false; }
+    }
+    if (handles.has(p)) { handles.set(np, handles.get(p)); handles.delete(p); persistHandles(); }
+    if (files.has(p)) { files.set(np, files.get(p)); files.delete(p); }
+    return { ok: true, path: np, moved, labelOnly: !moved };
+  }
+
   // Has the file changed on disk? Files opened with a handle can be checked and re-read at any time.
   // Files opened through <input type=file> are one-time copies: once the file changes the browser
   // refuses to read it again (NotReadableError), which is itself the sign that it changed.
@@ -410,6 +430,7 @@
     tailStart,
     tailStop,
     stat,
+    renameFile,
     readFrom,
     repick,
     dropPaths,

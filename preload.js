@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   liveFiles: true,
   sample: () => ipcRenderer.invoke('sample'),
   saveFile: (args) => ipcRenderer.invoke('file:save', args),
+  renameFile: (args) => ipcRenderer.invoke('file:rename', args),
   saveAs: (args) => ipcRenderer.invoke('dialog:saveAs', args),
   loadSession: () => ipcRenderer.invoke('session:load'),
   saveSession: (data) => ipcRenderer.invoke('session:save', data),

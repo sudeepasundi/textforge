@@ -525,32 +525,46 @@ body.compact table.grid th, body.compact table.grid td { padding: 2px 8px; font-
 body.compact .at-item { padding: 4px 7px; }
 body.compact #cp-fab { width: 46px; height: 46px; }
 
-/* ---- split view (0.8.0) ---- */
+/* ---- split view: several panes (0.9.0) ---- */
 #split { flex: none; width: var(--split-w, 50%); min-width: 0; display: flex; position: relative; }
 #split[hidden] { display: none; }
-#split-gutter { flex: none; width: 6px; cursor: col-resize; background: var(--line); position: relative; touch-action: none; }
-#split-gutter::after { content: ''; position: absolute; inset: 0 -3px; }
-#split-gutter:hover, #split-gutter:focus-visible { background: var(--accent); outline: none; }
-#split-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--editor); }
-.sp-head { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; color: var(--muted); flex: none; }
+.sp-gutter { flex: none; width: 6px; cursor: col-resize; background: var(--line); position: relative; touch-action: none; }
+.sp-gutter:not(.outer) { width: 4px; }
+.sp-gutter::after { content: ''; position: absolute; inset: 0 -3px; }
+.sp-gutter:hover, .sp-gutter:focus-visible { background: var(--accent); outline: none; }
+.sp-pane { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; background: var(--editor); container-type: inline-size; }
+.sp-pane.focused .sp-head { box-shadow: inset 0 -2px 0 var(--accent); }
+.sp-pane.flash .sp-head { animation: sp-flash .7s ease-out; }
+@keyframes sp-flash { from { background: var(--accent-soft); } }
+.sp-head { display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 10px; border-bottom: 1px solid var(--line); background: var(--surface); font-size: 12px; color: var(--muted); flex: none; min-width: 0; }
 .sp-head select { padding: 2px 6px; font-size: 12px; }
-.sp-head #sp-tab { flex: 1 1 auto; min-width: 70px; max-width: 320px; }
+.sp-head .sp-tab { flex: 1 1 auto; min-width: 70px; max-width: 320px; }
 .sp-head .icon-btn { flex: none; }
-#split-pane { container-type: inline-size; }
-@container (max-width: 430px) { .sp-head .sp-sync span { display: none; } }
-@container (max-width: 300px) { .sp-head .sp-sync { display: none; } }
 .sp-head .sp-sync { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .sp-head .grow { flex: 0 1 auto; }
-#split-editor { flex: 1; min-height: 0; }
+@container (max-width: 430px) { .sp-head .sp-sync span { display: none; } }
+@container (max-width: 300px) { .sp-head .sp-sync { display: none; } }
+.sp-editor { flex: 1; min-height: 0; }
 body.split-open #welcome { right: var(--split-w, 50%); }
-body.split-focus #split-pane .sp-head { box-shadow: inset 0 -2px 0 var(--accent); }
 .tab.in-split .kind { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
+#split-drop { position: absolute; z-index: 20; display: grid; place-items: center; pointer-events: none; border: 2px dashed var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+#split-drop span { background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; box-shadow: 0 8px 26px rgba(0,0,0,.3); font-weight: 500; }
 @media (max-width: 760px) {
   body.split-open #work { flex-direction: column; }
   #split { width: auto; height: var(--split-w, 50%); flex-direction: column; }
-  #split-gutter { width: auto; height: 6px; cursor: row-resize; }
-  .sp-head .sp-sync { display: none; }
+  .sp-gutter { width: auto !important; height: 6px; cursor: row-resize; }
 }
+
+/* ---- tabs: drag to reorder, rename, menu (0.9.0) ---- */
+.tab.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
+.tab.drop-after { box-shadow: inset -2px 0 0 var(--accent); }
+body.tab-dragging .tab { cursor: grabbing; }
+.tab-rename { width: 150px; min-width: 60px; padding: 1px 5px; font: inherit; font-size: 12.5px; height: 22px; border: 1px solid var(--accent); border-radius: 4px; background: var(--bg); color: var(--fg); }
+.menu { position: fixed; z-index: 120; min-width: 210px; padding: 4px; background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.35); display: flex; flex-direction: column; animation: pop .1s ease-out; }
+.menu button { text-align: left; background: none; border: none; border-radius: 5px; padding: 6px 10px; color: var(--fg); font-size: 12.5px; }
+.menu button:hover:not([disabled]), .menu button:focus-visible { background: var(--accent-soft); outline: none; }
+.menu button[disabled] { color: var(--muted); opacity: .6; cursor: default; }
+.menu .sep { height: 1px; background: var(--line); margin: 4px 6px; }
 
 /* ---- timeline drag-to-filter (0.8.1) ---- */
 #signal { touch-action: none; }
@@ -560,3 +574,12 @@ body.split-focus #split-pane .sp-head { box-shadow: inset 0 -2px 0 var(--accent)
 #signal .range i { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--editor) 72%, transparent); }
 #signal .range i.l { left: 0; border-right: 1px solid var(--accent); }
 #signal .range i.r { right: 0; border-left: 1px solid var(--accent); }
+
+/* ---- resizable bottom panel (0.9.0) ---- */
+#panel { position: relative; min-height: 120px; }
+#panel-grip { position: absolute; left: 0; right: 0; top: -4px; height: 8px; cursor: row-resize; z-index: 5; touch-action: none; }
+#panel-grip::after { content: ''; position: absolute; left: 50%; top: 2px; width: 36px; height: 4px; margin-left: -18px; border-radius: 2px; background: var(--line); opacity: 0; transition: opacity .12s; }
+#panel-grip:hover::after, #panel-grip:focus-visible::after, body.panel-resizing #panel-grip::after { opacity: 1; background: var(--accent); }
+#panel-grip:hover, #panel-grip:focus-visible { outline: none; box-shadow: inset 0 3px 0 -1px var(--accent); }
+body.panel-resizing, body.panel-resizing * { cursor: row-resize !important; user-select: none; }
+#panel.maxed #panel-max svg path { d: path("M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5"); }

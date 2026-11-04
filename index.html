@@ -65,25 +65,8 @@
             </div>
           </div>
         </div>
-        <div id="split" hidden>
-          <div id="split-gutter" role="separator" aria-orientation="vertical" aria-label="Resize split view" tabindex="0"></div>
-          <div id="split-pane">
-            <div class="sp-head">
-              <select id="sp-tab" aria-label="Tab shown on the right"></select>
-              <label class="sp-sync" title="Scroll the two sides together"><span>Scroll together</span>
-                <select id="sp-sync" aria-label="Scroll together">
-                  <option value="time">by time</option>
-                  <option value="line">by line</option>
-                  <option value="off">off</option>
-                </select>
-              </label>
-              <span class="grow"></span>
-              <button class="icon-btn small" id="sp-swap" title="Swap sides"><svg viewBox="0 0 24 24"><path d="M7 7h13l-3-3M17 17H4l3 3"/></svg></button>
-              <button class="icon-btn small" id="sp-close" title="Close split view (Ctrl+\)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-            </div>
-            <div id="split-editor"></div>
-          </div>
-        </div>
+        <div id="split" hidden></div>
+        <div id="split-drop" hidden><span></span></div>
         <div id="preview" hidden>
           <div class="pv-head">
             <strong>Preview</strong>
@@ -96,10 +79,12 @@
       </div>
       <button id="cp-fab" title="Copilot (Alt+4)" aria-label="Copilot"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15v4M17 17h4"/></svg></button>
       <div id="panel" hidden>
+        <div id="panel-grip" role="separator" aria-orientation="horizontal" aria-label="Resize panel" tabindex="0" title="Drag to resize. Double-click to reset."></div>
         <div id="panel-head">
           <strong id="panel-title"></strong>
           <span id="panel-tools"></span>
           <span class="grow"></span>
+          <button class="icon-btn small" id="panel-max" title="Make the panel taller / restore (Ctrl+Shift+M)"><svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg></button>
           <button class="icon-btn small" id="panel-close" title="Close panel"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
         </div>
         <div id="panel-body"></div>
