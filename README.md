@@ -24,9 +24,10 @@ logs automatically.
   never overwritten.
 - **Microsoft 365 Copilot** opens in a side or floating pane in the desktop app (in a window on the web). It
   can explain an error, find the root cause or summarise a log, with secrets masked first.
-- **Split view (Ctrl+\\, or drag a tab into the editor):** up to four files side by side. Panes scroll
-  together by timestamp, so gateway, order and payment logs line up at the same moment, or by line.
-  Filters, time ranges and Ctrl+F search apply to every pane.
+- **Snap layouts, like Windows 11:** hover the split button (or drag a tab) and pick a layout: side by side,
+  top and bottom, three columns, one large + two stacked, or a 2 × 2 grid. Empty spaces offer your open
+  files (Snap Assist). Panes scroll together by timestamp or line, and filters, time ranges and Ctrl+F
+  search apply to every pane.
 - **Tabs:** double-click to rename (unsaved tabs too; saved files are renamed on disk), drag to reorder,
   and right-click for more options.
 - **Resizable results panel:** drag its top edge, or maximise it.

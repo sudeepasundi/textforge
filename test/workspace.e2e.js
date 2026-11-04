@@ -5,6 +5,19 @@ let playwright;
 try { playwright = require('playwright'); } catch { playwright = require(path.join(process.env.HOME || '', '.npm-global/lib/node_modules/playwright')); }
 const URL_ = process.argv[2] || 'http://127.0.0.1:8765/';
 const results = [];
+// HTML drag and drop with a shared DataTransfer, so drop targets that only appear mid-drag work.
+async function dragTab(page, tabSel, targetSel, pos) {
+  const dt = await page.evaluateHandle(() => new DataTransfer());
+  await page.locator(tabSel).dispatchEvent('dragstart', { dataTransfer: dt });
+  await page.locator('#work').dispatchEvent('dragenter', { dataTransfer: dt });
+  await page.waitForTimeout(100);
+  const box = await page.locator(targetSel).boundingBox();
+  const at = { clientX: box.x + (pos ? pos.x : box.width / 2), clientY: box.y + (pos ? pos.y : box.height / 2) };
+  await page.locator(targetSel).dispatchEvent('dragover', Object.assign({ dataTransfer: dt }, at));
+  await page.locator(targetSel).dispatchEvent('drop', Object.assign({ dataTransfer: dt }, at));
+  await page.locator(tabSel).dispatchEvent('dragend', { dataTransfer: dt });
+  await page.waitForTimeout(300);
+}
 const ok = (name, pass, detail) => results.push({ name, pass: !!pass, detail });
 const mk = (svc, off) => Array.from({ length: 300 }, (_, i) => `2026-11-03 10:${String(Math.floor((i * 3 + off) / 60)).padStart(2, '0')}:${String((i * 3 + off) % 60).padStart(2, '0')}.000 ${i % 25 ? 'INFO' : 'ERROR'} [exec-${i % 4}] c.w.${svc} - ${svc} step ${i} traceId=t${i}`).join('\n');
 
@@ -73,18 +86,16 @@ const mk = (svc, off) => Array.from({ length: 300 }, (_, i) => `2026-11-03 10:${
 
   // ---------- split view: several panes, added by dragging ----------
   await page.click(`.tab[data-tab="${ids['gateway.log']}"]`);
-  await page.dragAndDrop(`.tab[data-tab="${ids['order.log']}"]`, '#editor', { targetPosition: { x: 400, y: 300 } });
-  await page.waitForTimeout(400);
+  const ew = await page.evaluate(() => document.getElementById('editor').getBoundingClientRect().width);
+  await dragTab(page, `.tab[data-tab="${ids['order.log']}"]`, '#editor', { x: ew * 0.8, y: 300 });
   r = await page.evaluate(() => (__tf.split ? __tf.split.panes.map((p) => p.tab.name) : []));
-  ok('Dragging a tab onto the editor opens it beside', JSON.stringify(r) === JSON.stringify(['order.log']), r.join(', '));
-  await page.dragAndDrop(`.tab[data-tab="${ids['payment.log']}"]`, '#editor', { targetPosition: { x: 200, y: 300 } });
-  await page.waitForTimeout(400);
+  ok('Dragging a tab onto the right half of the editor opens it side by side', JSON.stringify(r) === JSON.stringify(['order.log']), r.join(', '));
+  await dragTab(page, `.tab[data-tab="${ids['payment.log']}"]`, '#snapbar .snap-thumb[data-layout="cols3"] .snap-zone[data-slot="c"]');
   r = await page.evaluate(() => ({ panes: __tf.split.panes.map((p) => p.tab.name), widths: [document.getElementById('editor'), ...document.querySelectorAll('.sp-pane')].map((e) => Math.round(e.getBoundingClientRect().width)) }));
-  ok('A second drag adds a third file; all get the same width', r.panes.length === 2 && Math.max(...r.widths) - Math.min(...r.widths) < 30, JSON.stringify(r));
+  ok('Dropping a tab on the three-column layout in the snap bar adds a third file; all get the same width', r.panes.length === 2 && Math.max(...r.widths) - Math.min(...r.widths) < 30, JSON.stringify(r));
   // dropping on a pane replaces it
   const firstPane = await page.evaluate(() => __tf.split.panes[0].id);
-  await page.dragAndDrop(`.tab[data-tab="${untitled}"]`, `.sp-pane[data-pane="${firstPane}"] .sp-editor`);
-  await page.waitForTimeout(300);
+  await dragTab(page, `.tab[data-tab="${untitled}"]`, `.sp-pane[data-pane="${firstPane}"] .sp-editor`);
   r = await page.evaluate(() => __tf.split.panes.map((p) => p.tab.name));
   ok('Dropping a tab on a pane replaces that pane', r[0] === 'notes.json' && r.length === 2, r.join(', '));
   await page.selectOption(`.sp-pane[data-pane="${firstPane}"] .sp-tab`, { label: 'order.log' });
@@ -138,7 +149,7 @@ const mk = (svc, off) => Array.from({ length: 300 }, (_, i) => `2026-11-03 10:${
   r = await page.evaluate(() => __tf.split.panes.length);
   ok('A pane closes on its own', r === 2, r + ' panes');
   await page.keyboard.press('Control+Backslash');
-  r = await page.evaluate(() => ({ hidden: document.getElementById('split').hidden, panes: __tf.split.panes.length }));
+  r = await page.evaluate(() => ({ hidden: !document.body.classList.contains('split-open'), panes: __tf.split.panes.length }));
   ok('Ctrl+\\ closes the split view', r.hidden && r.panes === 0, JSON.stringify(r));
   ok('No errors', errors.length === 0, errors.join(' | ') || 'none');
 

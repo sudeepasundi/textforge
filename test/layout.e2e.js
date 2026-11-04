@@ -42,10 +42,10 @@ const mk = (svc, off) => Array.from({ length: 400 }, (_, i) => `2026-11-03 10:${
   // split view
   await page.evaluate(([a, c]) => { const x = __tf.newTab({ name: 'gateway.log', content: a }); __tf.newTab({ name: 'payment.log', content: c }); __tf.activate(x); }, [mk('Gateway', 0), mk('Payment', 1)]);
   await page.waitForTimeout(500);
-  await page.click('#topbar [data-act="split"]');
+  await page.keyboard.press('Control+Backslash');
   await page.waitForTimeout(400);
-  r = await page.evaluate(() => ({ open: !document.getElementById('split').hidden, right: __tf.split.panes[0].tab.name, sync: document.querySelector('.sp-sync select').value }));
-  ok('Split button opens the most recent other log on the right, synced by time', r.open && r.right === 'payment.log' && r.sync === 'time', JSON.stringify(r));
+  r = await page.evaluate(() => ({ open: document.body.classList.contains('split-open'), right: __tf.split.panes[0].tab.name, sync: document.querySelector('.sp-sync select').value }));
+  ok('Ctrl+\\ opens the most recent other log on the right, synced by time', r.open && r.right === 'payment.log' && r.sync === 'time', JSON.stringify(r));
   await page.evaluate(() => __tf.editor.revealLineNearTop(200));
   await page.waitForTimeout(300);
   // gateway lines are at 0, 3, 6 s...; payment lines at 1, 4, 7 s...: the right side must land 1 s later
@@ -64,12 +64,12 @@ const mk = (svc, off) => Array.from({ length: 400 }, (_, i) => `2026-11-03 10:${
   await page.click('.sp-pane button[title="Swap with the main editor"]');
   r = await page.evaluate(() => ({ left: __tf.active.name, right: __tf.split.panes[0].tab.name }));
   ok('Swap exchanges the two sides', r.left === 'payment.log' && r.right === 'gateway.log', JSON.stringify(r));
-  const g = await page.evaluate(() => { const b = document.querySelector('.sp-gutter.outer').getBoundingClientRect(); return { x: b.x + 3, y: b.y + 200 }; });
+  const g = await page.evaluate(() => { const b = document.querySelector('.sp-gutter.gx').getBoundingClientRect(); return { x: b.x + 3, y: b.y + 200 }; });
   await page.mouse.move(g.x, g.y); await page.mouse.down(); await page.mouse.move(g.x + 300, g.y, { steps: 5 }); await page.mouse.up();
   r = await page.evaluate(() => { const p = document.querySelector('.sp-pane').getBoundingClientRect(); const c = document.querySelector('.sp-pane button[title="Close this pane"]').getBoundingClientRect(); return { w: Math.round(p.width), closeVisible: c.width > 0 && c.right <= p.right + 0.5 }; });
   ok('Divider resizes; the header still fits when narrow', r.w < 450 && r.closeVisible, JSON.stringify(r));
   await page.keyboard.press('Control+Backslash');
-  r = await page.evaluate(() => document.getElementById('split').hidden);
+  r = await page.evaluate(() => !document.body.classList.contains('split-open'));
   ok('Ctrl+\\ closes the split view', r, String(r));
   await page.evaluate(() => __tf.openSplit());
   await page.evaluate(async () => { const t = __tf.split.panes[0] && __tf.split.panes[0].tab; await __tf.runCommand('Close tab').catch(() => {}); });
@@ -77,7 +77,7 @@ const mk = (svc, off) => Array.from({ length: 400 }, (_, i) => `2026-11-03 10:${
   await page.evaluate(async () => { const t = __tf.split.panes[0].tab; __tf.activate(t); });
   await page.keyboard.press('Control+w').catch(() => {});
   await page.waitForTimeout(300);
-  r = await page.evaluate(() => ({ open: !document.getElementById('split').hidden, right: __tf.split.panes[0] && __tf.split.panes[0].tab.name, tabs: __tf.tabs.map((t) => t.name) }));
+  r = await page.evaluate(() => ({ open: document.body.classList.contains('split-open'), right: __tf.split.panes[0] && __tf.split.panes[0].tab.name, tabs: __tf.tabs.map((t) => t.name) }));
   ok('Closing a tab never leaves the right side empty', !r.open || (r.right && r.tabs.includes(r.right)), JSON.stringify(r));
   // timeline: drag a time range, double-click clears it
   await page.evaluate(() => { __tf.closeSplit(); __tf.openSample(); });
@@ -96,7 +96,7 @@ const mk = (svc, off) => Array.from({ length: 400 }, (_, i) => `2026-11-03 10:${
   await page.evaluate(() => __tf.openSplit());
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
-  r = await page.evaluate(() => { const s = document.getElementById('split').getBoundingClientRect(); const e = document.getElementById('editor').getBoundingClientRect(); return { stacked: s.top >= e.bottom - 1, hscroll: document.documentElement.scrollWidth > innerWidth }; });
+  r = await page.evaluate(() => { const s = document.querySelector('.sp-pane').getBoundingClientRect(); const e = document.getElementById('editor').getBoundingClientRect(); return { stacked: s.top >= e.bottom - 1, hscroll: document.documentElement.scrollWidth > innerWidth }; });
   ok('On a phone the second side sits below, no sideways scrolling', r.stacked && !r.hscroll, JSON.stringify(r));
   ok('No errors', errors.length === 0, errors.join(' | ') || 'none');
   let pass = 0;

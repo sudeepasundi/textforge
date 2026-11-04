@@ -403,7 +403,7 @@
           document.body.classList.add('tab-dragging');
           dragTab = t;
         },
-        ondragend: () => { document.body.classList.remove('tab-dragging'); dragTab = null; clearTabDropMarks(); hideSplitDrop(); },
+        ondragend: () => endTabDrag(),
         ondragover: (e) => {
           if (!dragTab) return;
           e.preventDefault();
@@ -2121,7 +2121,7 @@
   function updateWelcome() {
     const w = $('#welcome');
     if (!w || !active) return;
-    const show = !active.path && active.model.getValueLength() === 0 && !$('#diff');
+    const show = !active.path && active.model.getValueLength() === 0 && !$('#diff') && !document.body.classList.contains('split-open');
     if (w.hidden !== !show) w.hidden = !show;
   }
   async function openSample() {
@@ -2509,11 +2509,22 @@
   }
 
   // ======================================================================
-  // SPLIT VIEW: up to three more panes beside the main editor, each showing any open tab
+  // SPLIT VIEW with snap layouts (like Windows 11)
   // ======================================================================
-  // Panes can scroll together by timestamp (several services' logs line up at the same moment) or
-  // by line. Filters and Ctrl+F search apply to every pane. Drag a tab into the editor to add it.
-  const MAX_PANES = 3;
+  // The editor area is a grid. A layout decides where the main editor (zone "a") and up to three
+  // panes (zones b, c, d) go. Pick a layout from the split button, or drag a tab onto the snap bar
+  // or onto a zone. Empty zones show the open files to choose from (Snap Assist). Panes can scroll
+  // together by time or line; filters and Ctrl+F search apply to every pane.
+  const LAYOUTS = {
+    cols2: { n: 2, label: 'Side by side', areas: ['a g1 b'], cols: ['c1', 'G', 'c2'], rows: ['r1'], gutters: { g1: ['x', 'c1', 'c2'] } },
+    rows2: { n: 2, label: 'Top and bottom', areas: ['a', 'h1', 'b'], cols: ['c1'], rows: ['r1', 'G', 'r2'], gutters: { h1: ['y', 'r1', 'r2'] } },
+    cols3: { n: 3, label: 'Three columns', areas: ['a g1 b g2 c'], cols: ['c1', 'G', 'c2', 'G', 'c3'], rows: ['r1'], gutters: { g1: ['x', 'c1', 'c2'], g2: ['x', 'c2', 'c3'] } },
+    right2: { n: 3, label: 'One large, two stacked', areas: ['a g1 b', 'a g1 h1', 'a g1 c'], cols: ['c1', 'G', 'c2'], rows: ['r1', 'G', 'r2'], gutters: { g1: ['x', 'c1', 'c2'], h1: ['y', 'r1', 'r2'] } },
+    grid4: { n: 4, label: 'Four in a grid', areas: ['a g1 b', 'h1 g1 h2', 'c g1 d'], cols: ['c1', 'G', 'c2'], rows: ['r1', 'G', 'r2'], gutters: { g1: ['x', 'c1', 'c2'], h1: ['y', 'r1', 'r2'], h2: ['y', 'r1', 'r2'] } },
+  };
+  const LAYOUT_ORDER = ['cols2', 'rows2', 'cols3', 'right2', 'grid4'];
+  const SLOTS = ['a', 'b', 'c', 'd'];
+  const GUTTER = 6;
   let split = null;
   let paneSeq = 0;
   function splitOptions() {
@@ -2527,21 +2538,21 @@
   }
   function ensureSplit() {
     if (split) return split;
-    split = { panes: [], mode: 'auto', locks: new Map() };
+    split = { panes: [], layout: null, fr: {}, mode: 'auto', locks: new Map() };
     editor.onDidScrollChange((e) => { if (e.scrollTopChanged) syncScroll(editor); });
     wireFindMirror(editor);
     return split;
   }
-  const splitOpen = () => !!(split && split.panes.length);
+  const splitOpen = () => !!(split && split.layout && split.panes.length);
   const inSplit = (t) => !!(split && split.panes.some((p) => p.tab === t));
-  const paneEditors = () => (split ? split.panes.map((p) => p.editor) : []);
+  const paneEditors = () => (split ? split.panes.filter((p) => p.tab).map((p) => p.editor) : []);
   const tabOfEditor = (ed) => (ed === editor ? active : (split && (split.panes.find((p) => p.editor === ed) || {}).tab) || null);
   function focusedTab() {
-    if (split) for (const p of split.panes) if (p.editor.hasTextFocus()) return p.tab;
+    if (split) for (const p of split.panes) if (p.tab && p.editor.hasTextFocus()) return p.tab;
     return active;
   }
-  function pickTabForPane() {
-    const shown = new Set([active, ...(split ? split.panes.map((p) => p.tab) : [])]);
+  function pickTabForPane(exclude = []) {
+    const shown = new Set([active, ...(split ? split.panes.map((p) => p.tab) : []), ...exclude]);
     const others = tabs.filter((t) => !shown.has(t) && !isPristineUntitled(t));
     const pool = isLogTab(active) && others.some(isLogTab) ? others.filter(isLogTab) : others;
     return pool.slice().sort((a, b) => (b.used || b.id) - (a.used || a.id))[0] || null;
@@ -2551,177 +2562,410 @@
     if (!from || !to || from === to || !isLogTab(to)) return;
     const f = from.filter;
     const keep = to.filter && to.filter.lines;
-    to.filter = Object.assign({}, f, { levels: new Set(f.levels), lines: keep || undefined });
-    if (!to.filter.lines) delete to.filter.lines;
+    to.filter = Object.assign({}, f, { levels: new Set(f.levels) });
+    if (keep) to.filter.lines = keep; else delete to.filter.lines;
     analyze(to);
     computeVisibility(to);
     applyHiddenAreas(to);
   }
-  function addSplitPane(tab, { replace } = {}) {
-    ensureSplit();
-    let t = tab || pickTabForPane();
-    if (!t) {
-      if (!split.panes.length) { t = active; toast('Showing this tab twice: scroll each side to compare two places. Open more files to compare them.', 4500); }
-      else { toast('Every open file is already shown. Open another file to add it.', 3500); return null; }
+  const stacked = () => window.innerWidth <= 760;
+  // phones: whatever the layout, the files stack top to bottom
+  function effectiveLayout() {
+    const L = LAYOUTS[split.layout];
+    if (!stacked() || L.n === 1) return L;
+    const areas = [], rows = [], gutters = {};
+    for (let i = 0; i < L.n; i++) {
+      if (i) { areas.push('s' + i); rows.push('G'); gutters['s' + i] = ['y', 'q' + (i - 1), 'q' + i]; }
+      areas.push(SLOTS[i]); rows.push('q' + i);
     }
-    const existing = split.panes.find((p) => p.tab === t);
-    if (existing && !replace) { flashPane(existing); return existing; }
-    if (replace) { setPaneTab(replace, t); return replace; }
-    if (split.panes.length >= MAX_PANES) {
-      const last = split.panes[split.panes.length - 1];
-      toast('Up to ' + (MAX_PANES + 1) + ' files fit side by side, so ' + last.tab.name + ' was swapped out.', 3500);
-      setPaneTab(last, t);
-      return last;
+    return { n: L.n, areas, cols: ['c1'], rows, gutters };
+  }
+  const track = (v) => (v === 'G' ? GUTTER + 'px' : 'minmax(0, ' + (split.fr[v] || 1) + 'fr)');
+  function applyGrid() {
+    const g = $('#editors');
+    if (!splitOpen()) {
+      g.style.gridTemplateAreas = '"a"'; g.style.gridTemplateColumns = 'minmax(0, 1fr)'; g.style.gridTemplateRows = 'minmax(0, 1fr)';
+      g.querySelectorAll('.sp-gutter').forEach((x) => x.remove());
+      return;
     }
-    const pane = { id: ++paneSeq, tab: null, weight: 1 };
+    const L = effectiveLayout();
+    g.style.gridTemplateAreas = L.areas.map((r) => '"' + r + '"').join(' ');
+    g.style.gridTemplateColumns = L.cols.map(track).join(' ');
+    g.style.gridTemplateRows = L.rows.map(track).join(' ');
+    // gutters
+    g.querySelectorAll('.sp-gutter').forEach((x) => x.remove());
+    for (const [name, spec] of Object.entries(L.gutters)) {
+      const el = h('div', { class: 'sp-gutter ' + (spec[0] === 'x' ? 'gx' : 'gy'), role: 'separator', tabindex: '0', 'aria-orientation': spec[0] === 'x' ? 'vertical' : 'horizontal', 'aria-label': 'Resize', title: 'Drag to resize. Double-click to make them equal.', style: 'grid-area:' + name });
+      wireGutter(el, spec, L);
+      g.append(el);
+    }
+    split.panes.forEach((p, i) => { p.el.style.gridArea = SLOTS[i + 1]; });
+    $('#editor').style.gridArea = 'a';
+  }
+  function wireGutter(el, [axis, v1, v2], L) {
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      const box = $('#editors').getBoundingClientRect();
+      const list = axis === 'x' ? L.cols : L.rows;
+      const size = axis === 'x' ? box.width : box.height;
+      const gut = list.filter((v) => v === 'G').length * GUTTER;
+      const sum = list.filter((v) => v !== 'G').reduce((a, v) => a + (split.fr[v] || 1), 0);
+      const px = (v) => ((split.fr[v] || 1) / sum) * (size - gut);
+      let start = axis === 'x' ? box.left : box.top;
+      for (const v of list) { if (v === v1) break; start += v === 'G' ? GUTTER : px(v); }
+      const pair = px(v1) + px(v2);
+      const frPair = (split.fr[v1] || 1) + (split.fr[v2] || 1);
+      const move = (ev) => {
+        const pos = (axis === 'x' ? ev.clientX : ev.clientY) - start - GUTTER / 2;
+        const a = Math.max(140, Math.min(pair - 140, pos));
+        split.fr[v1] = frPair * (a / pair);
+        split.fr[v2] = frPair - split.fr[v1];
+        const g = $('#editors');
+        if (axis === 'x') g.style.gridTemplateColumns = L.cols.map(track).join(' ');
+        else g.style.gridTemplateRows = L.rows.map(track).join(' ');
+      };
+      const up = () => { el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); };
+      el.addEventListener('pointermove', move);
+      el.addEventListener('pointerup', up);
+    });
+    el.addEventListener('dblclick', () => { split.fr = {}; applyGrid(); });
+    el.addEventListener('keydown', (e) => {
+      const keys = axis === 'x' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
+      if (!keys.includes(e.key)) return;
+      e.preventDefault();
+      const d = (e.key === keys[0] ? -0.1 : 0.1) * ((split.fr[v1] || 1) + (split.fr[v2] || 1));
+      const total = (split.fr[v1] || 1) + (split.fr[v2] || 1);
+      split.fr[v1] = Math.max(total * 0.15, Math.min(total * 0.85, (split.fr[v1] || 1) + d));
+      split.fr[v2] = total - split.fr[v1];
+      applyGrid();
+    });
+  }
+
+  function createPane() {
+    const pane = { id: ++paneSeq, tab: null };
     const sel = h('select', { class: 'sp-tab', 'aria-label': 'File shown in this pane', onchange: (e) => setPaneTab(pane, tabs.find((x) => String(x.id) === e.target.value)) });
     pane.sel = sel;
     const body = h('div', { class: 'sp-editor' });
+    pane.assist = h('div', { class: 'sp-assist', hidden: true });
+    const wrap = h('div', { class: 'sp-body' }, body, pane.assist);
     pane.el = h('div', { class: 'sp-pane', 'data-pane': String(pane.id) },
       h('div', { class: 'sp-head' }, sel,
         h('span', { class: 'grow' }),
-        h('button', { class: 'icon-btn small', title: 'Swap with the main editor', onclick: () => swapPane(pane), html: '<svg viewBox="0 0 24 24"><path d="M7 7h13l-3-3M17 17H4l3 3"/></svg>' }),
-        h('button', { class: 'icon-btn small', title: 'Close this pane', onclick: () => removePane(pane), html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>' })),
-      body);
-    const gutter = h('div', { class: 'sp-gutter', role: 'separator', tabindex: '0', 'aria-label': 'Resize panes', title: 'Drag to resize. Double-click to make all panes equal.' });
-    pane.gutter = gutter;
-    $('#split').append(gutter, pane.el);
+        h('button', { class: 'icon-btn small sp-swap', title: 'Swap with the main editor', onclick: () => swapPane(pane), html: '<svg viewBox="0 0 24 24"><path d="M7 7h13l-3-3M17 17H4l3 3"/></svg>' }),
+        h('button', { class: 'icon-btn small sp-close', title: 'Close this pane', onclick: () => removePane(pane), html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>' })),
+      wrap);
+    $('#editors').append(pane.el);
     pane.editor = monaco.editor.create(body, splitOptions());
     pane.editor.onDidScrollChange((e) => { if (e.scrollTopChanged) syncScroll(pane.editor); });
     pane.editor.onDidFocusEditorText(() => pane.el.classList.add('focused'));
     pane.editor.onDidBlurEditorText(() => pane.el.classList.remove('focused'));
     wireFindMirror(pane.editor);
-    wireGutter(gutter, pane);
-    split.panes.push(pane);
-    showSplit();
-    setPaneTab(pane, t);
-    equalizePanes();
     return pane;
   }
-  function setPaneTab(pane, t) {
-    if (!pane || !t) return;
-    pane.tab = t;
-    pane.editor.setModel(t.model);
-    shareFilter(active, t);
-    applyHiddenAreas(t);
+  function disposePane(pane) { pane.editor.dispose(); pane.el.remove(); }
+
+  // Put the layout in place. place = { tab, slot }: that file goes in that zone; other files keep
+  // their places in order; zones left over show Snap Assist.
+  function applyLayout(id, { place, fill = false } = {}) {
+    ensureSplit();
+    const L = LAYOUTS[id];
+    if (!L) return;
+    let shown = [active, ...split.panes.map((p) => p.tab).filter(Boolean)];
+    const slots = new Array(L.n).fill(null);
+    if (place && place.tab) {
+      shown = shown.filter((t) => t !== place.tab);
+      slots[SLOTS.indexOf(place.slot)] = place.tab;
+    }
+    for (let i = 0; i < L.n; i++) if (!slots[i] && shown.length) slots[i] = shown.shift();
+    if (!slots[0]) slots[0] = pickTabForPane(slots.filter(Boolean)) || active; // the main space can't be empty
+    if (fill) for (let i = 1; i < L.n; i++) if (!slots[i]) slots[i] = pickTabForPane(slots.filter(Boolean));
+    split.layout = id;
+    split.fr = {};
+    settings['layout' + L.n] = id;
+    saveSettings();
+    while (split.panes.length < L.n - 1) split.panes.push(createPane());
+    while (split.panes.length > L.n - 1) disposePane(split.panes.pop());
+    if (slots[0] !== active) activate(slots[0]);
+    split.panes.forEach((p, i) => setPaneTab(p, slots[i + 1], { quiet: true }));
+    $('#editors').classList.add('split');
+    document.body.classList.add('split-open');
+    applyGrid();
+    applyEditorOptions();
+    renderSplitHead();
+    renderTabs();
+    updateWelcome();
+    syncScroll(editor, true);
+  }
+  function setPaneTab(pane, t, { quiet } = {}) {
+    if (!pane) return;
+    pane.tab = t || null;
+    pane.editor.setModel(t ? t.model : null);
+    pane.el.classList.toggle('no-file', !t);
+    renderAssist(pane);
+    if (t) { shareFilter(active, t); applyHiddenAreas(t); }
+    if (quiet) return;
     renderSplitHead();
     renderTabs();
     syncScroll(editor, true);
+  }
+  // Snap Assist: an empty zone lists the open files to choose from.
+  function renderAssist(pane) {
+    const box = pane.assist;
+    box.hidden = !!pane.tab;
+    if (pane.tab) return;
+    box.innerHTML = '';
+    const list = tabs.filter((t) => !isPristineUntitled(t));
+    box.append(h('div', { class: 'sa-title' }, list.length ? 'Choose a file for this space' : 'Open a file to show it here'));
+    const grid = h('div', { class: 'sa-grid' });
+    for (const t of list) {
+      const shown = t === active || inSplit(t);
+      grid.append(h('button', { class: 'sa-card' + (shown ? ' shown' : ''), title: t.path && !/^(web|download):/.test(t.path) ? t.path : t.name, onclick: () => setPaneTab(pane, t) },
+        h('span', { class: 'kind' + (isLogTab(t) ? ' log' : '') }), h('span', { class: 'nm' }, t.name), shown ? h('span', { class: 'tag' }, 'shown') : null));
+    }
+    box.append(grid, h('div', { class: 'sa-foot' }, h('button', { onclick: () => actions.open() }, 'Open a file…'), h('button', { onclick: () => removePane(pane) }, 'Leave this space out')));
+  }
+  function preferredLayout(n) {
+    const want = settings['layout' + n];
+    if (want && LAYOUTS[want] && LAYOUTS[want].n === n) return want;
+    return { 2: 'cols2', 3: 'cols3', 4: 'grid4' }[n];
+  }
+  // "Show beside": one more file; the layout grows (2 -> 3 -> 4 files)
+  function addSplitPane(tab, { replace } = {}) {
+    ensureSplit();
+    if (replace) { setPaneTab(replace, tab); return replace; }
+    const t = tab || pickTabForPane();
+    if (t && inSplit(t)) { flashPane(split.panes.find((p) => p.tab === t)); return null; }
+    if (splitOpen()) {
+      const empty = split.panes.find((p) => !p.tab);
+      if (empty) { setPaneTab(empty, t || null); return empty; }
+      const n = split.panes.length + 2;
+      if (n > 4) {
+        const last = split.panes[split.panes.length - 1];
+        toast('Up to 4 files fit side by side, so ' + last.tab.name + ' was swapped out.', 3500);
+        setPaneTab(last, t);
+        return last;
+      }
+      applyLayout(preferredLayout(n), { place: t ? { tab: t, slot: SLOTS[n - 1] } : null, fill: false });
+      return split.panes[split.panes.length - 1];
+    }
+    if (!t) toast('Only one file is open: both sides show it, so you can compare two places. Pick another file at the top of the right side.', 4500);
+    applyLayout(preferredLayout(2), { place: { tab: t || active, slot: 'b' }, fill: false });
+    return split.panes[0];
   }
   function removePane(pane) {
     if (!split) return;
     const i = split.panes.indexOf(pane);
     if (i < 0) return;
     split.panes.splice(i, 1);
-    pane.editor.dispose();
-    pane.el.remove();
-    pane.gutter.remove();
-    if (!split.panes.length) { closeSplit(); return; }
-    equalizePanes();
+    disposePane(pane);
+    const n = split.panes.length + 1;
+    if (n < 2) { closeSplit(); return; }
+    split.layout = preferredLayout(n);
+    split.fr = {};
+    applyGrid();
     renderSplitHead();
     renderTabs();
   }
   function removeSplitTab(t) { if (split) split.panes.filter((p) => p.tab === t).forEach(removePane); }
-  function showSplit() {
-    $('#split').hidden = false;
-    document.body.classList.add('split-open');
-    applyEditorOptions();
-  }
   function closeSplit() {
     if (!split) return;
-    for (const p of split.panes.slice()) { p.editor.dispose(); p.el.remove(); p.gutter.remove(); }
+    for (const p of split.panes) disposePane(p);
     split.panes = [];
-    $('#split').hidden = true;
+    split.layout = null;
+    $('#editors').classList.remove('split');
     document.body.classList.remove('split-open');
+    applyGrid();
     applyEditorOptions();
     renderTabs();
+    updateWelcome();
     setTimeout(() => editor.layout(), 0);
     editor.focus();
   }
   function toggleSplit() { if (splitOpen()) closeSplit(); else addSplitPane(); }
   function swapPane(pane) {
-    pane = pane || (split && split.panes[0]);
-    if (!pane || pane.tab === active) return;
+    pane = pane || (split && split.panes.find((p) => p.tab));
+    if (!pane || !pane.tab || pane.tab === active) return;
     const left = active;
     activate(pane.tab);
     setPaneTab(pane, left);
   }
   const swapSplit = () => swapPane();
   function flashPane(pane) {
+    if (!pane) return;
     pane.el.classList.remove('flash');
     void pane.el.offsetWidth;
     pane.el.classList.add('flash');
-  }
-  // every file gets the same width; the main editor is one of them
-  function equalizePanes() {
-    if (!split) return;
-    const n = split.panes.length;
-    split.panes.forEach((p) => { p.weight = 1; p.el.style.flexGrow = '1'; });
-    $('#split').style.setProperty('--split-w', ((n / (n + 1)) * 100) + '%');
-    split.panes.forEach((p, i) => p.gutter.classList.toggle('outer', i === 0));
-  }
-  function wireGutter(g, pane) {
-    g.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      g.setPointerCapture(e.pointerId);
-      const stacked = window.innerWidth <= 760;
-      const work = $('#work').getBoundingClientRect();
-      const i = split.panes.indexOf(pane);
-      const prev = split.panes[i - 1];
-      const move = (ev) => {
-        if (i === 0) {
-          // the divider between the main editor and the panes
-          const share = stacked ? (work.bottom - ev.clientY) / work.height : (work.right - ev.clientX) / work.width;
-          const min = 0.15 * split.panes.length;
-          $('#split').style.setProperty('--split-w', (Math.max(min, Math.min(0.85, share)) * 100) + '%');
-        } else {
-          // between two panes: share their space
-          const a = prev.el.getBoundingClientRect(), b = pane.el.getBoundingClientRect();
-          const total = stacked ? a.height + b.height : a.width + b.width;
-          const pos = stacked ? ev.clientY - a.top : ev.clientX - a.left;
-          const fa = Math.max(0.15, Math.min(0.85, pos / total));
-          const sum = prev.weight + pane.weight;
-          prev.weight = sum * fa; pane.weight = sum * (1 - fa);
-          prev.el.style.flexGrow = String(prev.weight); pane.el.style.flexGrow = String(pane.weight);
-        }
-      };
-      const up = () => { g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up); };
-      g.addEventListener('pointermove', move);
-      g.addEventListener('pointerup', up);
-    });
-    g.addEventListener('dblclick', equalizePanes);
-    g.addEventListener('keydown', (e) => {
-      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-      const cur = parseFloat(getComputedStyle($('#split')).getPropertyValue('--split-w')) || 50;
-      $('#split').style.setProperty('--split-w', Math.max(15, Math.min(85, cur + (e.key === 'ArrowLeft' ? 5 : -5))) + '%');
-    });
   }
   function effectiveSyncMode() {
     if (!split) return 'off';
     if (split.mode !== 'auto') return split.mode;
     const timed = (t) => t && isLogTab(t) && analyze(t) && t.an.timeline;
-    const all = [active, ...split.panes.map((p) => p.tab)];
+    const all = [active, ...split.panes.map((p) => p.tab).filter(Boolean)];
     const distinct = new Set(all).size === all.length;
     if (all.every(timed) && distinct) return 'time';
     return distinct ? 'line' : 'off';
   }
   function renderSplitHead() {
     if (!split) return;
-    split.panes.forEach((pane, i) => {
+    let syncDone = false;
+    split.panes.forEach((pane) => {
       pane.sel.innerHTML = '';
+      if (!pane.tab) pane.sel.append(h('option', { value: '', selected: true }, 'Choose a file…'));
       tabs.forEach((t) => pane.sel.append(h('option', { value: String(t.id), selected: t === pane.tab }, t.name + (t === active ? '  (main editor)' : ''))));
       const head = pane.el.querySelector('.sp-head');
       let sync = head.querySelector('.sp-sync');
-      if (i === 0 && !sync) {
+      const want = !syncDone && !!pane.tab;
+      if (want && !sync) {
         sync = h('label', { class: 'sp-sync', title: 'Scroll all panes together' }, h('span', null, 'Scroll together'),
           h('select', { 'aria-label': 'Scroll together', onchange: (e) => { split.mode = e.target.value; syncScroll(editor, true); } },
             h('option', { value: 'time' }, 'by time'), h('option', { value: 'line' }, 'by line'), h('option', { value: 'off' }, 'off')));
         pane.sel.after(sync);
-      } else if (i > 0 && sync) sync.remove();
-      if (i === 0) sync.querySelector('select').value = effectiveSyncMode();
+      } else if (!want && sync) sync.remove();
+      if (want) { sync.querySelector('select').value = effectiveSyncMode(); syncDone = true; }
+      if (!pane.tab) renderAssist(pane);
     });
   }
+
+  // ---------- the layout picker (split button) and the snap bar (while dragging a tab) ----------
+  function layoutThumb(id, { onZone, current, dropTarget } = {}) {
+    const L = LAYOUTS[id];
+    const t = h('div', { class: 'snap-thumb' + (current ? ' current' : ''), 'data-layout': id, title: L.label, role: 'group', 'aria-label': L.label });
+    t.style.gridTemplateAreas = L.areas.map((r) => '"' + r.replace(/\b[gh]\d\b/g, '.') + '"').join(' ');
+    t.style.gridTemplateColumns = L.cols.map((v) => (v === 'G' ? '3px' : '1fr')).join(' ');
+    t.style.gridTemplateRows = L.rows.map((v) => (v === 'G' ? '3px' : '1fr')).join(' ');
+    for (let i = 0; i < L.n; i++) {
+      const slot = SLOTS[i];
+      const z = h('button', { class: 'snap-zone', 'data-slot': slot, style: 'grid-area:' + slot, 'aria-label': L.label + ', ' + (['left / first', 'second', 'third', 'fourth'][i]) + ' space', onclick: () => onZone && onZone(id, slot) });
+      if (dropTarget) {
+        z.addEventListener('dragover', (e) => { if (!dragTab) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; $$('.snap-zone.hot').forEach((x) => x.classList.remove('hot')); z.classList.add('hot'); showSnapPreview(zoneRect(id, slot), 'Snap ' + dragTab.name + ' here'); });
+        z.addEventListener('dragleave', () => z.classList.remove('hot'));
+        z.addEventListener('drop', (e) => { if (!dragTab) return; e.preventDefault(); e.stopPropagation(); const tb = dragTab; endTabDrag(); applyLayout(id, { place: { tab: tb, slot }, fill: false }); });
+      }
+      t.append(z);
+    }
+    return t;
+  }
+  // where a zone of a layout would be on screen (equal sizes)
+  function zoneRect(id, slot) {
+    const r = $('#editors').getBoundingClientRect();
+    const w = r.width, hh = r.height, x = r.left, y = r.top;
+    const geo = {
+      cols2: { a: [0, 0, .5, 1], b: [.5, 0, .5, 1] },
+      rows2: { a: [0, 0, 1, .5], b: [0, .5, 1, .5] },
+      cols3: { a: [0, 0, 1 / 3, 1], b: [1 / 3, 0, 1 / 3, 1], c: [2 / 3, 0, 1 / 3, 1] },
+      right2: { a: [0, 0, .5, 1], b: [.5, 0, .5, .5], c: [.5, .5, .5, .5] },
+      grid4: { a: [0, 0, .5, .5], b: [.5, 0, .5, .5], c: [0, .5, .5, .5], d: [.5, .5, .5, .5] },
+    }[id][slot];
+    return { left: x + geo[0] * w, top: y + geo[1] * hh, width: geo[2] * w, height: geo[3] * hh };
+  }
+  function showSnapPreview(rect, label) {
+    const pv = $('#snap-preview');
+    const wr = $('#work').getBoundingClientRect();
+    pv.hidden = false;
+    pv.style.left = (rect.left - wr.left + 4) + 'px'; pv.style.top = (rect.top - wr.top + 4) + 'px';
+    pv.style.width = Math.max(0, rect.width - 8) + 'px'; pv.style.height = Math.max(0, rect.height - 8) + 'px';
+    pv.querySelector('span').textContent = label;
+  }
+  function hideSnapPreview() { const pv = $('#snap-preview'); if (pv) pv.hidden = true; $$('.snap-zone.hot').forEach((x) => x.classList.remove('hot')); }
+
+  // Picker on the split button: click a zone of a layout = put this file there.
+  let pickerTimer = null;
+  function openLayoutPicker() {
+    closeLayoutPicker();
+    const btn = $('#topbar [data-act="split"]');
+    const pick = h('div', { id: 'snap-picker', role: 'dialog', 'aria-label': 'Snap layouts' },
+      h('div', { class: 'sp-title' }, 'Snap layouts', h('span', null, 'Click where this file should go')),
+      h('div', { class: 'snap-grid' }, LAYOUT_ORDER.map((id) => layoutThumb(id, {
+        current: split && split.layout === id,
+        onZone: (lid, slot) => { closeLayoutPicker(); applyLayout(lid, { place: { tab: active, slot } }); },
+      }))),
+      splitOpen() ? h('button', { class: 'sp-off', onclick: () => { closeLayoutPicker(); closeSplit(); } }, 'Back to one editor (Ctrl+\\)') : null);
+    document.body.append(pick);
+    const r = btn.getBoundingClientRect();
+    const pr = pick.getBoundingClientRect();
+    pick.style.left = Math.max(8, Math.min(window.innerWidth - pr.width - 8, r.left + r.width / 2 - pr.width / 2)) + 'px';
+    pick.style.top = (r.bottom + 6) + 'px';
+    pick.addEventListener('mouseenter', () => clearTimeout(pickerTimer));
+    pick.addEventListener('mouseleave', () => { pickerTimer = setTimeout(closeLayoutPicker, 350); });
+    setTimeout(() => document.addEventListener('mousedown', pickerAway, true), 0);
+    document.addEventListener('keydown', pickerKey, true);
+    return pick;
+  }
+  function pickerAway(e) { if (!e.target.closest('#snap-picker') && !e.target.closest('[data-act="split"]')) closeLayoutPicker(); }
+  function pickerKey(e) { if (e.key === 'Escape' && $('#snap-picker')) { e.stopPropagation(); closeLayoutPicker(); } }
+  function closeLayoutPicker() {
+    clearTimeout(pickerTimer);
+    const p = $('#snap-picker');
+    if (p) p.remove();
+    document.removeEventListener('mousedown', pickerAway, true);
+    document.removeEventListener('keydown', pickerKey, true);
+  }
+  function wireLayoutButton() {
+    const btn = $('#topbar [data-act="split"]');
+    btn.title = 'Snap layouts: show files side by side (Ctrl+\\ for two side by side)';
+    btn.setAttribute('aria-haspopup', 'dialog');
+    btn.addEventListener('mouseenter', () => { clearTimeout(pickerTimer); pickerTimer = setTimeout(() => { if (!$('#snap-picker')) openLayoutPicker(); }, 450); });
+    btn.addEventListener('mouseleave', () => { clearTimeout(pickerTimer); pickerTimer = setTimeout(() => { const p = $('#snap-picker'); if (p && !p.matches(':hover')) closeLayoutPicker(); }, 350); });
+  }
+
+  // While a tab is dragged over the editor: a snap bar with every layout at the top, and the
+  // current zones as big targets ("show here").
+  function wireSnapDrag() {
+    const work = $('#work');
+    const bar = $('#snapbar');
+    const zoneUnder = (e) => {
+      const zones = splitOpen() ? [{ slot: 'a', el: $('#editor') }, ...split.panes.map((p, i) => ({ slot: SLOTS[i + 1], el: p.el, pane: p }))] : null;
+      if (zones) {
+        for (const z of zones) { const r = z.el.getBoundingClientRect(); if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return Object.assign(z, { rect: r }); }
+        return null;
+      }
+      // one editor: left half = show it here, right half = side by side
+      const r = $('#editors').getBoundingClientRect();
+      const right = e.clientX > r.left + r.width / 2;
+      return { slot: right ? 'b' : 'a', rect: zoneRect('cols2', right ? 'b' : 'a'), beside: right };
+    };
+    work.addEventListener('dragenter', (e) => {
+      if (!dragTab) return;
+      if (bar.hidden) {
+        bar.innerHTML = '';
+        bar.append(h('div', { class: 'sb-title' }, 'Drop on a layout'), ...LAYOUT_ORDER.map((id) => layoutThumb(id, { dropTarget: true, current: split && split.layout === id })));
+        bar.hidden = false;
+      }
+    });
+    work.addEventListener('dragover', (e) => {
+      if (!dragTab || e.target.closest('#snapbar')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const z = zoneUnder(e);
+      if (!z) { hideSnapPreview(); return; }
+      showSnapPreview(z.rect, z.slot === 'a' ? 'Show ' + dragTab.name + ' in the main editor' : z.beside ? 'Show ' + dragTab.name + ' side by side' : 'Show ' + dragTab.name + ' here');
+    });
+    work.addEventListener('dragleave', (e) => { if (!work.contains(e.relatedTarget)) { hideSnapPreview(); bar.hidden = true; } });
+    work.addEventListener('drop', (e) => {
+      if (!dragTab || e.target.closest('#snapbar')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const t = dragTab;
+      const z = zoneUnder(e);
+      endTabDrag();
+      if (!z) return;
+      if (z.slot === 'a') { activate(t); return; }
+      if (z.pane) setPaneTab(z.pane, t);
+      else applyLayout(preferredLayout(2), { place: { tab: t, slot: 'b' }, fill: false });
+    });
+  }
+  function endTabDrag() {
+    hideSnapPreview();
+    const bar = $('#snapbar');
+    if (bar) bar.hidden = true;
+    document.body.classList.remove('tab-dragging');
+    dragTab = null;
+    clearTabDropMarks();
+  }
+  window.addEventListener('resize', debounce(() => { if (splitOpen()) applyGrid(); }, 120));
+
   // first visible line -> timestamp of the entry it belongs to
   function entryTsAt(tab, line0) {
     const an = tab.an;
@@ -2811,41 +3055,6 @@
       } finally { mirroringFind = false; }
     });
   }
-  // Drag a tab into the editor area: on the main editor it opens beside; on a pane it replaces that pane.
-  function wireSplitDrop() {
-    const work = $('#work');
-    const drop = $('#split-drop');
-    const where = (e) => {
-      if (split) for (const p of split.panes) { const r = p.el.getBoundingClientRect(); if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return p; }
-      return null;
-    };
-    work.addEventListener('dragover', (e) => {
-      if (!dragTab) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      const pane = where(e);
-      const full = split && split.panes.length >= MAX_PANES && !pane;
-      const box = (pane ? pane.el : $('#editor')).getBoundingClientRect();
-      const wr = work.getBoundingClientRect();
-      drop.hidden = false;
-      drop.style.left = (box.left - wr.left) + 'px'; drop.style.top = (box.top - wr.top) + 'px';
-      drop.style.width = box.width + 'px'; drop.style.height = box.height + 'px';
-      drop.querySelector('span').textContent = pane ? 'Drop to show ' + dragTab.name + ' here' : full ? 'Up to ' + (MAX_PANES + 1) + ' files side by side' : 'Drop to show ' + dragTab.name + ' beside';
-    });
-    work.addEventListener('dragleave', (e) => { if (!work.contains(e.relatedTarget)) hideSplitDrop(); });
-    work.addEventListener('drop', (e) => {
-      if (!dragTab) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const t = dragTab;
-      const pane = where(e);
-      hideSplitDrop();
-      if (pane) addSplitPane(t, { replace: pane });
-      else addSplitPane(t);
-    });
-  }
-  function hideSplitDrop() { const d = $('#split-drop'); if (d) d.hidden = true; }
-
   // ======================================================================
   // CHANGED ON DISK: reload open files when another program changes them
   // ======================================================================
@@ -3208,7 +3417,8 @@
       ['Editor commands (sort lines, change case, …)', 'Edit', 'F1', () => { editor.focus(); editor.trigger('tf', 'editor.action.quickCommand'); }],
       ['Toggle word wrap', 'View', 'Alt+Z', actions.wrap],
       [splitOpen() ? 'Close split view' : 'Split view: show another tab beside this one', 'View', 'Ctrl+\\', toggleSplit],
-      ...(splitOpen() ? [['Split view: add another tab', 'View', '', () => addSplitPane()], ['Split view: swap the first pane with the main editor', 'View', '', swapSplit]] : []),
+      ...LAYOUT_ORDER.map((id) => ['Snap layout: ' + LAYOUTS[id].label.toLowerCase(), 'View', '', () => applyLayout(id)]),
+      ...(splitOpen() ? [['Split view: add another file', 'View', '', () => addSplitPane()], ['Split view: swap the first pane with the main editor', 'View', '', swapSplit]] : []),
       ['Rename tab', 'File', 'double-click a tab', () => active && startRename(active)],
       ['Toggle sidebar', 'View', 'Ctrl+B', () => (currentView ? hideSide() : showView(settings.view || 'insights', { toggle: false }))],
       ['Appearance and settings', 'View', 'Ctrl+,', () => showView('appearance', { toggle: false })],
@@ -3340,7 +3550,7 @@
     open: openFiles,
     save: () => { const t = focusedTab(); return t && saveTab(t); },
     saveAs: () => { const t = focusedTab(); return t && saveTab(t, true); },
-    split: () => toggleSplit(),
+    split: () => { const p = $('#snap-picker') || openLayoutPicker(); const z = p.querySelector('.snap-thumb.current .snap-zone, .snap-zone'); if (z) z.focus(); },
     close: () => active && closeTab(active),
     palette: openPalette,
     help: showHelp,
@@ -3463,7 +3673,8 @@
     $('#panel-close').onclick = closePanel;
     wireSideResize();
     wireSignal();
-    wireSplitDrop();
+    wireSnapDrag();
+    wireLayoutButton();
     wirePanelResize();
     wirePreview();
     wireCopilotPane();
@@ -3523,6 +3734,6 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
-    Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
+    Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
   }
 })();

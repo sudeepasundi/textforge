@@ -176,3 +176,18 @@ TABS, SPLIT VIEW AND RESULTS PANEL (0.9.0)
   search apply to every pane. "Scroll together" keeps every pane at the same time.
   Results panel (tables, counts, duplicates): drag its top edge to resize it,
   double-click the edge to reset, or use the expand button (Ctrl+Shift+M).
+
+SNAP LAYOUTS (0.10.0)
+  Split view now works like Windows 11 Snap Layouts.
+  - Hover (or click) the split button in the top bar: five layouts appear - side by
+    side, top and bottom, three columns, one large + two stacked, and a 2 x 2 grid.
+    Click the space where the current file should go.
+  - Spaces left empty show your open files as cards (Snap Assist): click one to fill
+    the space, or "Leave this space out".
+  - Drag a tab over the editor: the same layouts appear at the top. Drop the tab on a
+    space in one of them. Or drop it straight onto the editor: the right half opens it
+    side by side, and an existing pane shows it there instead. An outline shows where
+    it will land.
+  - Drag the dividers to resize; double-click a divider to make the spaces equal.
+  - Ctrl+\ still opens / closes two files side by side in one step.
+  - On a phone the files stack top to bottom.
