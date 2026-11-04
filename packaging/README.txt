@@ -191,3 +191,14 @@ SNAP LAYOUTS (0.10.0)
   - Drag the dividers to resize; double-click a divider to make the spaces equal.
   - Ctrl+\ still opens / closes two files side by side in one step.
   - On a phone the files stack top to bottom.
+
+OPEN FILES LIST (0.11.0)
+  The top icon in the side rail (Ctrl+Shift+E) lists every open file, with its folder.
+  It marks the file in the editor ("open"), files in split view ("split"), logs, and
+  unsaved changes (dot). Type to filter (Enter opens the first match), sort by tab
+  order, name, recently used or type, and use the arrow keys plus Enter to move around.
+  Click a file to open it, double-click (or F2) to rename, Delete or the x to close,
+  and right-click for the tab menu. Drag files to change their order, or drag one onto
+  the editor or the snap bar to show it side by side.
+  The tab bar stays: tab names are no longer squeezed, the bar scrolls sideways
+  instead (the mouse wheel scrolls it).

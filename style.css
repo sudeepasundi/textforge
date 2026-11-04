@@ -373,7 +373,7 @@ body.frameless .top-actions { border-right: 1px solid var(--line); }
 body.frameless.os-darwin .brand { padding-left: 4px; }
 
 /* ---- top bar ---- */
-#tabs .tab { flex: 0 1 auto; min-width: 84px; max-width: 220px; }
+#tabs .tab { flex: 0 0 auto; min-width: 0; max-width: 220px; } /* full names; the bar scrolls (all files are also in the Open files list) */
 #tabs .tab .name { min-width: 0; }
 #tabs .tab { transition: background .1s, color .1s; }
 #tabs .tab:not(.active):hover { background: color-mix(in srgb, var(--raised) 60%, transparent); }
@@ -615,3 +615,40 @@ body.tab-dragging .tab { cursor: grabbing; }
 #panel-grip:hover, #panel-grip:focus-visible { outline: none; box-shadow: inset 0 3px 0 -1px var(--accent); }
 body.panel-resizing, body.panel-resizing * { cursor: row-resize !important; user-select: none; }
 #panel.maxed #panel-max svg path { d: path("M3 8h5V3M21 8h-5V3M3 16h5v5M21 16h-5v5"); }
+
+/* ---- open files list (0.11.0) ---- */
+.rail-btn .badge.files-count { background: var(--raised); color: var(--fg); border: 1px solid var(--line); font-weight: 600; }
+.view[data-view="files"].on { display: flex; flex-direction: column; padding-bottom: 10px; }
+.fl-tools { display: flex; gap: 6px; margin: 6px 0 4px; }
+.fl-search { flex: 1; min-width: 0; padding: 5px 9px; font-size: 12.5px; }
+.fl-sort { padding: 4px 6px; font-size: 12px; }
+.fl-summary { font-size: 11.5px; color: var(--muted); margin: 2px 2px 6px; }
+.fl-list { flex: 1; min-height: 80px; overflow: auto; margin: 0 -8px; padding: 0 4px; scrollbar-width: thin; }
+.fl-item { position: relative; display: flex; align-items: center; gap: 9px; padding: 6px 6px 6px 10px; margin: 1px 0; border-radius: 7px; cursor: pointer; border: 1px solid transparent; outline: none; user-select: none; }
+.fl-item:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.fl-item:focus-visible { border-color: var(--accent); }
+.fl-item.active { background: var(--accent-soft); }
+.fl-item.active::before { content: ''; position: absolute; left: 2px; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--accent); }
+.fl-item.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.fl-item.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.fl-kind { width: 8px; height: 8px; border-radius: 2px; background: var(--line); flex: none; }
+.fl-kind.log { background: var(--accent); }
+.fl-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.fl-name { font-size: 12.8px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-item.active .fl-name { font-weight: 600; }
+.fl-dir { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-dir:empty { display: none; }
+.fl-where { flex: none; font-size: 10.5px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.fl-where.main { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.fl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg); flex: none; display: none; }
+.fl-item.dirty .fl-dot { display: block; }
+.fl-x { flex: none; opacity: 0; }
+.fl-item:hover .fl-x, .fl-item:focus-visible .fl-x, .fl-item.active .fl-x { opacity: .8; }
+.fl-rename { flex: 1; min-width: 0; padding: 2px 6px; font-size: 12.5px; border: 1px solid var(--accent); border-radius: 4px; }
+.fl-foot { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.fl-foot button { font-size: 12px; padding: 4px 10px; }
+
+/* the tab bar scrolls sideways when many files are open (wheel scrolls it too) */
+#tabs { scroll-behavior: smooth; scrollbar-width: thin; }
+#tabs::-webkit-scrollbar { height: 4px; }
+#tabs .tab .name { max-width: 170px; }

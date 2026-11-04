@@ -430,6 +430,8 @@
     }
     updateTitle();
     if (splitOpen()) renderSplitHead();
+    updateFilesBadge();
+    if (currentView === 'files') renderFiles();
   }
 
   // ---------- reorder tabs by dragging ----------
@@ -1559,7 +1561,7 @@
   // ======================================================================
   // SIDEBAR
   // ======================================================================
-  const VIEW_TITLES = { insights: 'Log insights', extract: 'Extract data', highlight: 'Highlight rules', copilot: 'Copilot', appearance: 'Appearance and settings' };
+  const VIEW_TITLES = { files: 'Open files', insights: 'Log insights', extract: 'Extract data', highlight: 'Highlight rules', copilot: 'Copilot', appearance: 'Appearance and settings' };
 
   function showView(name, { toggle = true } = {}) {
     if (name === 'copilot') { openCopilot({ toggle }); return; }
@@ -1575,7 +1577,7 @@
     $$('#side .view').forEach((v) => v.classList.toggle('on', v.dataset.view === name));
     if (name === 'copilot') side.style.setProperty('--side-w', Math.max(settings.sideWidth, 420) + 'px');
     else side.style.setProperty('--side-w', settings.sideWidth + 'px');
-    ({ insights: renderInsights, extract: renderExtract, highlight: renderHighlight, copilot: renderCopilot, appearance: renderAppearance })[name]();
+    ({ files: renderFiles, insights: renderInsights, extract: renderExtract, highlight: renderHighlight, copilot: renderCopilot, appearance: renderAppearance })[name]();
     setTimeout(() => editor && editor.layout(), 0);
   }
   function hideSide() {
@@ -1586,6 +1588,135 @@
     setTimeout(() => editor && editor.layout(), 0);
   }
   const view = (name) => (name === 'copilot' ? $('#cp-body') : $(`#side .view[data-view="${name}"]`));
+
+  // ---------- open files (all tabs as a list) ----------
+  const filesState = { q: '', sort: 'open' };
+  function fileDir(t) {
+    if (!t.path || /^(web|download):/.test(t.path)) return t.path ? '' : 'not saved';
+    const parts = t.path.replace(/\\/g, '/').split('/');
+    parts.pop();
+    const dir = parts.join('/') || '/';
+    return dir.length > 48 ? '…' + dir.slice(-47) : dir;
+  }
+  function updateFilesBadge() {
+    const b = $('#rail .files-count');
+    if (!b) return;
+    const n = tabs.length;
+    b.hidden = n < 2;
+    b.textContent = n > 99 ? '99+' : String(n);
+  }
+  function renderFiles() {
+    const v = view('files');
+    if (!v) return;
+    const prevScroll = v.querySelector('.fl-list') ? v.querySelector('.fl-list').scrollTop : 0;
+    const hadFocus = document.activeElement && document.activeElement.closest && document.activeElement.closest('.view[data-view="files"]');
+    const focusId = hadFocus && document.activeElement.dataset ? document.activeElement.dataset.tab : null;
+    const searchFocused = hadFocus && document.activeElement.classList.contains('fl-search');
+    const caret = searchFocused ? document.activeElement.selectionStart : null;
+    if (v.querySelector('.fl-rename')) return; // a name is being typed
+    v.innerHTML = '';
+    const dirty = tabs.filter(isDirty).length;
+    const search = h('input', { class: 'fl-search', type: 'search', value: filesState.q, placeholder: 'Filter ' + tabs.length + ' open file' + (tabs.length === 1 ? '' : 's'), 'aria-label': 'Filter open files', spellcheck: false,
+      oninput: (e) => { filesState.q = e.target.value; renderFiles(); },
+      onkeydown: (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); const first = v.querySelector('.fl-item'); if (first) first.focus(); } else if (e.key === 'Enter') { const first = v.querySelector('.fl-item'); if (first) first.click(); } } });
+    const sortSel = h('select', { class: 'fl-sort', 'aria-label': 'Sort', onchange: (e) => { filesState.sort = e.target.value; renderFiles(); } },
+      [['open', 'Tab order'], ['name', 'Name'], ['recent', 'Recently used'], ['type', 'Type']].map(([val, l]) => h('option', { value: val, selected: filesState.sort === val }, l)));
+    v.append(h('div', { class: 'fl-tools' }, search, sortSel),
+      h('div', { class: 'fl-summary' }, tabs.length + ' open' + (dirty ? ', ' + dirty + ' unsaved' : '') + (splitOpen() ? ', ' + (split.panes.filter((p) => p.tab).length + 1) + ' on screen' : '')));
+    const q = filesState.q.trim().toLowerCase();
+    let list = tabs.slice();
+    if (q) list = list.filter((t) => t.name.toLowerCase().includes(q) || (t.path || '').toLowerCase().includes(q));
+    const ext = (t) => (t.name.includes('.') ? t.name.split('.').pop().toLowerCase() : '');
+    if (filesState.sort === 'name') list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    else if (filesState.sort === 'recent') list.sort((a, b) => (b.used || 0) - (a.used || 0));
+    else if (filesState.sort === 'type') list.sort((a, b) => ext(a).localeCompare(ext(b)) || a.name.localeCompare(b.name));
+    const ul = h('div', { class: 'fl-list', role: 'listbox', 'aria-label': 'Open files' });
+    const canReorder = filesState.sort === 'open' && !q;
+    for (const t of list) {
+      const where = t === active ? 'main' : inSplit(t) ? 'split' : '';
+      const item = h('div', {
+        class: 'fl-item' + (t === active ? ' active' : '') + (isDirty(t) ? ' dirty' : ''),
+        role: 'option', tabindex: '0', 'aria-selected': String(t === active), 'data-tab': String(t.id), draggable: 'true',
+        title: (t.path && !/^(web|download):/.test(t.path) ? t.path : t.name) + '\nClick to open, double-click to rename, drag onto the editor to show it side by side',
+        onclick: () => { activate(t); renderFiles(); },
+        ondblclick: (e) => { if (!e.target.closest('.fl-x')) startListRename(t); },
+        oncontextmenu: (e) => { e.preventDefault(); tabMenu(t, e.clientX, e.clientY); },
+        onauxclick: (e) => { if (e.button === 1) { e.preventDefault(); closeTab(t); } },
+        onkeydown: (e) => {
+          const items = $$('.view[data-view="files"] .fl-item');
+          const i = items.indexOf(e.currentTarget);
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = items[i + (e.key === 'ArrowDown' ? 1 : -1)]; if (n) n.focus(); else if (e.key === 'ArrowUp') search.focus(); }
+          else if (e.key === 'Enter') { e.preventDefault(); activate(t); renderFiles(); }
+          else if (e.key === 'F2') { e.preventDefault(); startListRename(t); }
+          else if (e.key === 'Delete') { e.preventDefault(); closeTab(t); }
+        },
+        ondragstart: (e) => {
+          e.dataTransfer.setData('application/x-textforge-tab', String(t.id));
+          e.dataTransfer.setData('text/plain', t.name);
+          e.dataTransfer.effectAllowed = 'move';
+          document.body.classList.add('tab-dragging');
+          dragTab = t;
+        },
+        ondragend: () => { endTabDrag(); $$('.fl-item').forEach((x) => x.classList.remove('drop-before', 'drop-after')); },
+        ondragover: (e) => {
+          if (!dragTab || !canReorder) return;
+          e.preventDefault();
+          const r = e.currentTarget.getBoundingClientRect();
+          $$('.fl-item').forEach((x) => x.classList.remove('drop-before', 'drop-after'));
+          if (dragTab !== t) e.currentTarget.classList.add(e.clientY > r.top + r.height / 2 ? 'drop-after' : 'drop-before');
+        },
+        ondrop: (e) => {
+          if (!dragTab || !canReorder) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const r = e.currentTarget.getBoundingClientRect();
+          moveTab(dragTab, t, e.clientY > r.top + r.height / 2);
+        },
+      },
+      h('span', { class: 'fl-kind' + (isLogTab(t) ? ' log' : '') }),
+      h('span', { class: 'fl-text' }, h('span', { class: 'fl-name' }, t.name), h('span', { class: 'fl-dir' }, fileDir(t))),
+      where ? h('span', { class: 'fl-where ' + where, title: where === 'main' ? 'In the main editor' : 'Shown in split view' }, where === 'main' ? 'open' : 'split') : null,
+      h('span', { class: 'fl-dot', title: 'Unsaved changes' }),
+      h('button', { class: 'fl-x icon-btn small', title: 'Close', 'aria-label': 'Close ' + t.name, tabindex: '-1', onclick: (e) => { e.stopPropagation(); closeTab(t); }, html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>' }));
+      ul.append(item);
+    }
+    if (!list.length) ul.append(h('div', { class: 'msg' }, q ? 'No open file matches "' + filesState.q + '".' : 'No files open.'));
+    const saved = tabs.filter((t) => !isDirty(t));
+    v.append(ul,
+      h('div', { class: 'fl-foot' },
+        h('button', { onclick: () => actions.new() }, 'New tab'),
+        h('button', { onclick: () => actions.open() }, 'Open a file…'),
+        h('button', { title: 'Close every tab without unsaved changes', disabled: saved.length === 0 || saved.length === tabs.length && tabs.length === 1, onclick: async () => { for (const t of saved.slice()) if (tabs.length > 1 || t.model.getValueLength()) await closeTab(t); } }, 'Close saved')),
+      canReorder ? h('p', { class: 'hint' }, 'Drag files to change their order, or drag one onto the editor to show it side by side.') : h('p', { class: 'hint' }, 'Switch to "Tab order" with no filter to drag files into a new order.'));
+    const nl = v.querySelector('.fl-list');
+    if (nl) nl.scrollTop = prevScroll;
+    if (searchFocused) { search.focus(); if (caret != null) search.setSelectionRange(caret, caret); }
+    else if (focusId) { const el = v.querySelector(`.fl-item[data-tab="${focusId}"]`); if (el) el.focus(); }
+  }
+  function startListRename(t) {
+    const item = $(`.view[data-view="files"] .fl-item[data-tab="${t.id}"]`);
+    if (!item) return;
+    const nameEl = item.querySelector('.fl-name');
+    const input = h('input', { class: 'fl-rename', value: t.name, spellcheck: false, 'aria-label': 'New name for ' + t.name });
+    nameEl.replaceWith(input);
+    item.draggable = false;
+    input.focus();
+    const dot = t.name.lastIndexOf('.');
+    input.setSelectionRange(0, dot > 0 ? dot : t.name.length);
+    let done = false;
+    const finish = async (commit) => {
+      if (done) return;
+      done = true;
+      const value = input.value.trim();
+      input.remove();
+      if (commit && value && value !== t.name) await renameTab(t, value);
+      renderFiles();
+      renderTabs();
+    };
+    input.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); finish(true); } else if (e.key === 'Escape') { e.preventDefault(); finish(false); } });
+    input.addEventListener('blur', () => finish(true));
+    ['mousedown', 'click', 'dblclick'].forEach((ev) => input.addEventListener(ev, (e) => e.stopPropagation()));
+  }
 
   // ---------- insights ----------
   function renderInsights() {
@@ -3380,6 +3511,7 @@
       ['Save', 'File', 'Ctrl+S', actions.save],
       ['Save as', 'File', 'Ctrl+Shift+S', actions.saveAs],
       ['Close tab', 'File', 'Ctrl+W', actions.close],
+      ['Open files: list every open file', 'View', 'Ctrl+Shift+E', () => showView('files', { toggle: false })],
       ['Log insights: filters, levels, repeated errors', 'Logs', 'Ctrl+1', () => showView('insights', { toggle: false })],
       ['Auto tables: build tables from this log', 'Logs', '', () => { extractState.preset = 'auto'; if (currentView === 'extract') renderExtract(); return runAutoTables(); }],
       ['Extract data from log to a table', 'Logs', 'Ctrl+2', () => showView('extract', { toggle: false })],
@@ -3585,6 +3717,7 @@
     else if (ctrl && !e.shiftKey && k === 'w') actions.close();
     else if (ctrl && e.shiftKey && k === 'f') openSearch();
     else if (ctrl && e.shiftKey && k === 't') openTableView();
+    else if (ctrl && e.shiftKey && (k === 'e' || k === 'E')) showView('files');
     else if (alt && (k === '1' || e.code === 'Digit1')) showView('insights');
     else if (alt && (k === '2' || e.code === 'Digit2')) showView('extract');
     else if (alt && (k === '3' || e.code === 'Digit3')) showView('highlight');
@@ -3670,6 +3803,8 @@
     $$('[data-act]').forEach((b) => { b.onclick = () => actions[b.dataset.act] && actions[b.dataset.act](); });
     $$('#rail .rail-btn[data-view]').forEach((b) => { b.onclick = () => showView(b.dataset.view); });
     $('#side-close').onclick = hideSide;
+    // mouse wheel over the tab bar scrolls it sideways
+    $('#tabs').addEventListener('wheel', (e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.preventDefault(); $('#tabs').scrollLeft += e.deltaY; } }, { passive: false });
     $('#panel-close').onclick = closePanel;
     wireSideResize();
     wireSignal();

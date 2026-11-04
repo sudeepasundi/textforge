@@ -28,6 +28,8 @@ logs automatically.
   top and bottom, three columns, one large + two stacked, or a 2 × 2 grid. Empty spaces offer your open
   files (Snap Assist). Panes scroll together by timestamp or line, and filters, time ranges and Ctrl+F
   search apply to every pane.
+- **Open files list (Ctrl+Shift+E):** every open file in the sidebar with its folder, unsaved and split markers,
+  a filter box and sorting. Click to open, drag to reorder or onto the editor to show side by side.
 - **Tabs:** double-click to rename (unsaved tabs too; saved files are renamed on disk), drag to reorder,
   and right-click for more options.
 - **Resizable results panel:** drag its top edge, or maximise it.

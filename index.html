@@ -27,6 +27,7 @@
 
   <div id="body">
     <nav id="rail" aria-label="Tools">
+      <button class="rail-btn" data-view="files" title="Open files (Ctrl+Shift+E)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7z"/><path d="M14 3v4h4"/><path d="M9 21h9a2 2 0 0 0 2-2V9"/></svg><span class="badge files-count" hidden></span></button>
       <button class="rail-btn" data-view="insights" title="Log insights (Ctrl+1)"><svg viewBox="0 0 24 24"><path d="M2 12h4l3-8 4 16 3-8h6"/></svg></button>
       <button class="rail-btn" data-view="extract" title="Extract data (Ctrl+2)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg></button>
       <button class="rail-btn" data-view="highlight" title="Highlight rules (Ctrl+3)"><svg viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg></button>
@@ -37,6 +38,7 @@
 
     <aside id="side" hidden>
       <div class="side-head"><h2 id="side-title"></h2><button class="icon-btn small" id="side-close" title="Close sidebar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+      <section class="view" data-view="files"></section>
       <section class="view" data-view="insights"></section>
       <section class="view" data-view="extract"></section>
       <section class="view" data-view="highlight"></section>
