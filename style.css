@@ -298,7 +298,8 @@ table.md-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(
 table.md-table tbody tr:hover td { background: var(--accent-soft); }
 @media (max-width: 760px) {
   #work.with-preview #editor { display: none; }
-  #preview { flex-basis: 100%; border-left: none; }
+  #preview { flex-basis: 100% !important; border-left: none; }
+  #pv-resize { display: none; }
 }
 
 textarea.flt-lines { font: 12px/1.5 var(--mono); resize: vertical; min-height: 44px; }
@@ -652,3 +653,25 @@ body.panel-resizing, body.panel-resizing * { cursor: row-resize !important; user
 #tabs { scroll-behavior: smooth; scrollbar-width: thin; }
 #tabs::-webkit-scrollbar { height: 4px; }
 #tabs .tab .name { max-width: 170px; }
+
+/* ---- full screen + resizable preview (0.12.0) ---- */
+#preview { position: relative; }
+#pv-resize { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; z-index: 4; touch-action: none; }
+#pv-resize:hover, #pv-resize:focus-visible, body.col-resizing #pv-resize { outline: none; box-shadow: inset 3px 0 0 -1px var(--accent); }
+body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none; }
+.pv-head { cursor: default; }
+.fs-mode {
+  position: fixed !important; inset: 0 !important; left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important;
+  width: auto !important; height: auto !important; max-width: none !important; max-height: none !important;
+  z-index: 80 !important; border: none !important; border-radius: 0 !important; margin: 0 !important; transform: none !important;
+  flex-basis: auto !important; box-shadow: none !important;
+}
+#preview.fs-mode #pv-resize, #panel.fs-mode #panel-grip, #cp-host.fs-mode .cp-grip { display: none; }
+#preview.fs-mode #preview-body { padding: 24px max(28px, calc((100vw - 1100px) / 2)) 60px; }
+#preview.fs-mode .md { margin: 0 auto; }
+#panel.fs-mode { display: flex; flex-direction: column; }
+#panel.fs-mode #panel-body { flex: 1; }
+#panel.fs-mode #panel-max { display: none; }
+#cp-host.fs-mode #cp-dock { display: none; }
+body.has-fs #cp-fab { display: none; }
+.fs-btn.on { color: var(--accent-text); }

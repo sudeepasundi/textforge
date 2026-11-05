@@ -32,6 +32,8 @@ logs automatically.
   a filter box and sorting. Click to open, drag to reorder or onto the editor to show side by side.
 - **Tabs:** double-click to rename (unsaved tabs too; saved files are renamed on disk), drag to reorder,
   and right-click for more options.
+- **Full screen** for the preview (Alt+Shift+P), the comparison, the results panel and Copilot; Esc exits.
+  The preview can also be resized by dragging its edge.
 - **Resizable results panel:** drag its top edge, or maximise it.
 - **Compact or comfortable density**, 6 themes and accent colours.
 - **Editor:** Monaco (the editor from VS Code), with tabs, find in all tabs, multi-cursor, column select,

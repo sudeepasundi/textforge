@@ -202,3 +202,14 @@ OPEN FILES LIST (0.11.0)
   the editor or the snap bar to show it side by side.
   The tab bar stays: tab names are no longer squeezed, the bar scrolls sideways
   instead (the mouse wheel scrolls it).
+
+RESIZABLE PREVIEW AND FULL SCREEN (0.12.0)
+  Preview: drag its left edge to make it wider or narrower (double-click the edge to
+  reset to half). The width is remembered.
+  Full screen: the preview, the comparison, the results panel and the Copilot pane
+  each have a full-screen button (four corners). Double-clicking the preview or
+  comparison header does the same, and Alt+Shift+P opens the preview straight in full
+  screen. Esc (or the same button) goes back; the window returns to exactly the size
+  and position it had. Alt+P still shows / hides the preview beside the editor.
+  Also: double-click the sidebar edge to reset its width, and settings changed just
+  before closing the app are no longer lost.

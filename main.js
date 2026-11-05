@@ -122,6 +122,21 @@ function createWindow() {
     } catch { /* ignore */ }
   });
   win.on('closed', () => { win = null; });
+
+  // Full screen from inside the app (preview, comparison, results, Copilot): put the window back
+  // exactly as it was afterwards, maximised or not.
+  let beforeFs = null;
+  win.on('enter-html-full-screen', () => { if (!beforeFs) beforeFs = { bounds: win.getNormalBounds(), maximized: win.isMaximized() }; });
+  win.on('leave-html-full-screen', () => {
+    const prev = beforeFs;
+    beforeFs = null;
+    if (!prev) return;
+    setTimeout(() => {
+      if (!win || win.isFullScreen()) return;
+      if (prev.maximized) { if (!win.isMaximized()) win.maximize(); }
+      else { if (win.isMaximized()) win.unmaximize(); win.setBounds(prev.bounds); }
+    }, 60);
+  });
 }
 
 app.on('second-instance', (_e, argv) => {

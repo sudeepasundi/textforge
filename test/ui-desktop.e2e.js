@@ -74,6 +74,19 @@ const appDir = path.join(__dirname, '..');
     });
     return ok(r.same && r.loads === 0, `same page: ${r.same}, reloads: ${r.loads}`);
   });
+  await check('Full screen (Alt+Shift+P on the preview) fills the screen, and Esc puts the window back as it was', async () => {
+    await E(() => { if (__tf.closeCopilot) __tf.closeCopilot(); const t = __tf.newTab({ name: 'fs.md', content: '# Full screen\n\n| a | b |\n|---|---|\n| 1 | 2 |' }); __tf.activate(t); });
+    const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds());
+    await win.keyboard.press('Alt+Shift+P');
+    await win.waitForTimeout(1200);
+    const during = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFullScreen());
+    const fill = await E(() => { const b = document.getElementById('preview').getBoundingClientRect(); return b.width === innerWidth && b.height === innerHeight; });
+    await win.keyboard.press('Escape');
+    await win.waitForTimeout(1500);
+    const after = await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; return { fs: w.isFullScreen(), b: w.getBounds() }; });
+    const same = after.b.width === before.width && after.b.height === before.height && after.b.x === before.x && after.b.y === before.y;
+    return ok(during && fill && !after.fs && same, `full screen: ${during}, preview fills: ${fill}, back to ${after.b.width}x${after.b.height} (was ${before.width}x${before.height})`);
+  });
   await check('No errors in the app window', async () => ok(errors.length === 0, errors.join(' | ') || 'none'));
 
   let pass = 0;

@@ -90,9 +90,11 @@
     settings.mask = Object.assign({}, defaults.mask, saved.mask || {});
     if (!Array.isArray(settings.rules)) settings.rules = DEFAULT_RULES;
   } catch { /* ignore */ }
-  const saveSettings = debounce(() => {
-    try { localStorage.setItem('tf-settings2', JSON.stringify(settings)); } catch { /* ignore */ }
-  }, 300);
+  const writeSettings = () => { try { localStorage.setItem('tf-settings2', JSON.stringify(settings)); } catch { /* ignore */ } };
+  const saveSettings = debounce(writeSettings, 300);
+  // a change made just before closing must not be lost to the delay above
+  window.addEventListener('pagehide', writeSettings);
+  window.addEventListener('beforeunload', writeSettings);
 
   // ---------------- themes ----------------
   const THEMES = {
@@ -919,18 +921,98 @@
   }
 
   // ======================================================================
+  // FULL SCREEN for the preview, the comparison, the results panel and Copilot
+  // ======================================================================
+  // The area covers the whole app window, and the window itself goes full screen where that is
+  // allowed (desktop app, browser tab). Esc, the same button or double-clicking the header exits.
+  let fsEl = null;
+  let fsExit = null;
+  function isFullscreen(el) { return !!fsEl && (!el || fsEl === el); }
+  function enterFullscreen(el, { label, onExit } = {}) {
+    if (!el) return;
+    if (fsEl) exitFullscreen();
+    fsEl = el;
+    fsExit = onExit || null;
+    el.classList.add('fs-mode');
+    document.body.classList.add('has-fs');
+    try {
+      const root = document.documentElement;
+      if (settings.fsWindow !== false && document.fullscreenEnabled && root.requestFullscreen && !document.fullscreenElement) root.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
+    } catch { /* not allowed here: the in-app full screen still works */ }
+    updateFsButtons();
+    layoutEditors();
+    toast((label || 'This view') + ' is full screen. Press Esc to exit.', 2600);
+  }
+  function exitFullscreen() {
+    if (!fsEl) return;
+    const el = fsEl;
+    const cb = fsExit;
+    fsEl = null;
+    fsExit = null;
+    el.classList.remove('fs-mode');
+    document.body.classList.remove('has-fs');
+    try { if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {}); } catch { /* ignore */ }
+    updateFsButtons();
+    layoutEditors();
+    if (cb) cb();
+  }
+  function toggleFullscreen(el, opts) { if (isFullscreen(el)) exitFullscreen(); else enterFullscreen(el, opts); }
+  function layoutEditors() {
+    setTimeout(() => { if (editor) editor.layout(); if (typeof diffEditor !== 'undefined' && diffEditor) diffEditor.layout(); }, 30);
+  }
+  function updateFsButtons() {
+    $$('.fs-btn').forEach((b) => {
+      const host = b.closest('#preview, #diff, #panel, #cp-host');
+      const on = !!host && host === fsEl;
+      b.classList.toggle('on', on);
+      b.title = on ? 'Exit full screen (Esc)' : (b.dataset.title || b.title);
+      if (!b.dataset.title && !on) b.dataset.title = b.title;
+      b.innerHTML = on ? '<svg viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
+      b.setAttribute('aria-pressed', String(on));
+    });
+  }
+  function wireFullscreen() {
+    $$('.fs-btn').forEach((b) => { b.dataset.title = b.title; });
+    document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && fsEl) exitFullscreen(); });
+    // Esc leaves full screen; dialogs, menus, the palette, the find box and suggestions get Esc first.
+    // (Capture phase: decided before those close themselves on the same key press.)
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !fsEl) return;
+      if (!$('#modal').hidden || $('.menu') || $('#snap-picker') || !$('#palette').hidden || $('.tab-rename, .fl-rename')) return;
+      const ae = document.activeElement;
+      if (ae && ae.closest && (ae.closest('.find-widget') || ae.closest('.suggest-widget'))) return;
+      if ($$('.monaco-editor .suggest-widget.visible, .monaco-editor .find-widget.visible').some((w) => fsEl.contains(w))) return;
+      e.preventDefault();
+      e.stopPropagation();
+      exitFullscreen();
+    }, true);
+    const head = (sel, el, opts) => {
+      const hd = $(sel);
+      if (hd) hd.addEventListener('dblclick', (e) => { if (e.target.closest('button, select, input, a')) return; toggleFullscreen(el(), opts()); });
+    };
+    $('#pv-full').onclick = () => toggleFullscreen($('#preview'), { label: 'The preview' });
+    head('#preview .pv-head', () => $('#preview'), () => ({ label: 'The preview' }));
+    $('#panel-full').onclick = () => toggleFullscreen($('#panel'), { label: 'The results panel' });
+    head('#panel-head', () => $('#panel'), () => ({ label: 'The results panel' }));
+    $('#cp-full').onclick = () => toggleFullscreen($('#cp-host'), { label: 'Copilot' });
+  }
+
+  // ======================================================================
   // MARKDOWN PREVIEW
   // ======================================================================
-  function setPreview(on) {
+  function setPreview(on, { full } = {}) {
     if (!active) return;
     active.preview = on;
     applyPreview();
-    if (on) toast('Preview on. Click a table header to sort; Copy as rich text pastes into Teams or Outlook with tables intact.', 5000);
+    if (on && full) enterFullscreen($('#preview'), { label: 'The preview' });
+    else if (on) toast('Preview on. Drag its left edge to resize, or press Alt+Shift+P for full screen. Copy as rich text pastes into Teams or Outlook with tables intact.', 5000);
   }
 
   function applyPreview() {
     const on = !!(active && active.preview);
+    if (!on && isFullscreen($('#preview'))) exitFullscreen();
     $('#preview').hidden = !on;
+    $('#preview').style.flexBasis = (settings.previewW || 50) + '%';
     $('#work').classList.toggle('with-preview', on);
     $('#st-preview').classList.toggle('on', on);
     if (on) renderPreview();
@@ -959,6 +1041,38 @@
     body.scrollTop = keep;
   };
   const schedulePreview = debounce(renderPreview, 180);
+
+  // Drag the preview's left edge to make it wider or narrower (20%-85% of the editor area).
+  function wirePreviewResize() {
+    const g = $('#pv-resize');
+    const set = (pct, save) => {
+      const v = Math.max(20, Math.min(85, pct));
+      $('#preview').style.flexBasis = v + '%';
+      if (save) { settings.previewW = Math.round(v * 10) / 10; saveSettings(); }
+      if (editor) editor.layout();
+    };
+    g.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || isFullscreen($('#preview'))) return;
+      e.preventDefault();
+      g.setPointerCapture(e.pointerId);
+      const box = $('#work').getBoundingClientRect();
+      document.body.classList.add('col-resizing');
+      const move = (ev) => set(((box.right - ev.clientX) / box.width) * 100);
+      const up = () => {
+        g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up);
+        document.body.classList.remove('col-resizing');
+        set(parseFloat($('#preview').style.flexBasis), true);
+      };
+      g.addEventListener('pointermove', move);
+      g.addEventListener('pointerup', up);
+    });
+    g.addEventListener('dblclick', () => set(50, true));
+    g.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      set((parseFloat($('#preview').style.flexBasis) || 50) + (e.key === 'ArrowLeft' ? 5 : -5), true);
+    });
+  }
 
   function decorateTable(table) {
     const wrap = table.parentElement;
@@ -1082,9 +1196,12 @@
         h('span', { class: 'grow' }),
         h('button', { onclick: () => { if (diffEditor) diffEditor.goToDiff('next'); } }, 'Next change'),
         h('button', { onclick: () => { if (diffEditor) diffEditor.goToDiff('previous'); } }, 'Previous change'),
+        h('button', { class: 'icon-btn small fs-btn', title: 'Full screen. Esc to exit', 'data-title': 'Full screen. Esc to exit', html: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>', onclick: () => toggleFullscreen($('#diff'), { label: 'The comparison' }) }),
         h('button', { class: 'icon-btn small', title: 'Close comparison', html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>', onclick: closeCompare })),
       h('div', { class: 'diff-body' }));
     $('#work').append(host);
+    host.querySelector('.pv-head').title = 'Double-click to toggle full screen';
+    host.querySelector('.pv-head').addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleFullscreen(host, { label: 'The comparison' }); });
     updateWelcome();
     diffEditor = monaco.editor.createDiffEditor(host.querySelector('.diff-body'), {
       automaticLayout: true, renderSideBySide: true, originalEditable: false, readOnly: false, theme: 'tf',
@@ -1094,6 +1211,7 @@
     return true;
   }
   function closeCompare() {
+    if (isFullscreen($('#diff'))) exitFullscreen();
     if (diffEditor) { diffEditor.setModel(null); diffEditor.dispose(); diffEditor = null; }
     const d = $('#diff');
     if (d) d.remove();
@@ -2304,6 +2422,7 @@
     setTimeout(() => editor && editor.layout(), 0);
   }
   function closeCopilot() {
+    if (isFullscreen($('#cp-host'))) exitFullscreen();
     $('#cp-host').hidden = true;
     document.body.classList.remove('cp-open');
     $('#cp-fab').classList.remove('on');
@@ -3357,6 +3476,7 @@
     window.addEventListener('resize', debounce(() => { if (!$('#panel').hidden) setPanelHeight($('#panel').offsetHeight, false); }, 150));
   }
 
+  function exitPanelFullscreen() { if (isFullscreen($('#panel'))) exitFullscreen(); }
   function openPanel(mode, title) {
     panelMode = mode;
     const wasHidden = $('#panel').hidden;
@@ -3370,6 +3490,7 @@
     editor.layout();
   }
   function closePanel() {
+    exitPanelFullscreen();
     $('#panel').hidden = true;
     $('#cp-fab').style.bottom = '';
     panelMode = null;
@@ -3551,6 +3672,8 @@
       [splitOpen() ? 'Close split view' : 'Split view: show another tab beside this one', 'View', 'Ctrl+\\', toggleSplit],
       ...LAYOUT_ORDER.map((id) => ['Snap layout: ' + LAYOUTS[id].label.toLowerCase(), 'View', '', () => applyLayout(id)]),
       ...(splitOpen() ? [['Split view: add another file', 'View', '', () => addSplitPane()], ['Split view: swap the first pane with the main editor', 'View', '', swapSplit]] : []),
+      ['Preview in full screen', 'View', 'Alt+Shift+P', () => (active && active.preview ? enterFullscreen($('#preview'), { label: 'The preview' }) : setPreview(true, { full: true }))],
+      ...(fsEl ? [['Exit full screen', 'View', 'Esc', exitFullscreen]] : []),
       ['Rename tab', 'File', 'double-click a tab', () => active && startRename(active)],
       ['Toggle sidebar', 'View', 'Ctrl+B', () => (currentView ? hideSide() : showView(settings.view || 'insights', { toggle: false }))],
       ['Appearance and settings', 'View', 'Ctrl+,', () => showView('appearance', { toggle: false })],
@@ -3726,6 +3849,11 @@
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyW') actions.close();
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyT') openTableView();
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyP') setPreview(!(active && active.preview));
+    else if (e.altKey && !ctrl && e.shiftKey && e.code === 'KeyP') {
+      if (isFullscreen($('#preview'))) exitFullscreen();
+      else if (active && active.preview) enterFullscreen($('#preview'), { label: 'The preview' });
+      else setPreview(true, { full: true });
+    }
     else if (ctrl && !e.shiftKey && k === ',') showView('appearance');
     else if (ctrl && !e.shiftKey && (k === '\\' || e.code === 'Backslash')) toggleSplit();
     else if (ctrl && e.shiftKey && (k === 'm' || k === 'M')) togglePanelMax();
@@ -3743,6 +3871,8 @@
   function wireSideResize() {
     const handle = $('#side-resize');
     const side = $('#side');
+    handle.title = 'Drag to resize. Double-click to reset.';
+    handle.addEventListener('dblclick', () => { side.style.removeProperty('--side-w'); delete settings.sideWidth; saveSettings(); if (editor) editor.layout(); });
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       handle.classList.add('drag');
@@ -3811,6 +3941,8 @@
     wireSnapDrag();
     wireLayoutButton();
     wirePanelResize();
+    wirePreviewResize();
+    wireFullscreen();
     wirePreview();
     wireCopilotPane();
     wireWelcome();
@@ -3869,6 +4001,6 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
-    Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
+    Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
   }
 })();
