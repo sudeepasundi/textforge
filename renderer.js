@@ -1021,8 +1021,10 @@
 
   const renderPreview = () => {
     if (!active || !active.preview) return;
-    const body = $('#preview-body');
-    const keep = body.scrollTop;
+    const scroller = $('#preview-body');
+    const body = $('#preview-doc');
+    const keep = scroller.scrollTop;
+    $('#pv-name').textContent = active.name;
     body.innerHTML = '';
     if (active.model.getValueLength() > 3000000) {
       body.append(h('p', { class: 'hint' }, 'This tab is too large to preview.'));
@@ -1038,7 +1040,7 @@
     }
     body.querySelectorAll('table.md-table').forEach(decorateTable);
     if (!body.childNodes.length) body.append(h('p', { class: 'hint' }, 'Nothing to preview yet. Paste a chat or type Markdown.'));
-    body.scrollTop = keep;
+    scroller.scrollTop = keep;
   };
   const schedulePreview = debounce(renderPreview, 180);
 
@@ -1114,7 +1116,7 @@
 
   // Rich HTML for Teams / Outlook / Word: the preview with inline styles, without our buttons.
   function previewRichHtml() {
-    const clone = $('#preview-body').cloneNode(true);
+    const clone = $('#preview-doc').cloneNode(true);
     clone.querySelectorAll('.md-table-tools, input').forEach((x) => x.remove());
     clone.querySelectorAll('[data-line]').forEach((x) => x.removeAttribute('data-line'));
     clone.querySelectorAll('table').forEach((t) => { t.removeAttribute('class'); t.setAttribute('border', '1'); t.setAttribute('cellspacing', '0'); t.setAttribute('cellpadding', '4'); t.style.cssText = 'border-collapse:collapse;font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:11pt'; });
@@ -1205,6 +1207,7 @@
     updateWelcome();
     diffEditor = monaco.editor.createDiffEditor(host.querySelector('.diff-body'), {
       automaticLayout: true, renderSideBySide: true, originalEditable: false, readOnly: false, theme: 'tf',
+      renderGutterMenu: false, renderMarginRevertIcon: false, // no empty revert-arrow strip between the sides
       fontFamily: `'${settings.fontFamily}', 'JetBrains Mono', Consolas, monospace`, fontSize: settings.fontSize, ignoreTrimWhitespace: false,
     });
     diffEditor.setModel({ original: other.model, modified: active.model });

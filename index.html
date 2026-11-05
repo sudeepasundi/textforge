@@ -72,13 +72,13 @@
         <div id="preview" hidden>
           <div id="pv-resize" role="separator" aria-orientation="vertical" aria-label="Resize preview" tabindex="0" title="Drag to resize. Double-click to reset."></div>
           <div class="pv-head" title="Double-click to toggle full screen">
-            <strong>Preview</strong>
+            <strong>Preview</strong><span id="pv-name"></span>
             <span class="grow"></span>
             <button id="pv-copy" title="Copies the formatted document. Paste into Teams, Outlook or Word to keep tables and formatting.">Copy as rich text</button>
             <button class="icon-btn small fs-btn" id="pv-full" title="Full screen (Alt+Shift+P). Esc to exit"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
             <button class="icon-btn small" id="pv-close" title="Close preview (Alt+P)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
           </div>
-          <div id="preview-body" class="md"></div>
+          <div id="preview-body"><div id="preview-doc" class="md"></div></div>
         </div>
       </div>
       <button id="cp-fab" title="Copilot (Alt+4)" aria-label="Copilot"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15v4M17 17h4"/></svg></button>

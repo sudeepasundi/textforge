@@ -168,6 +168,39 @@ const fills = (r, w) => r && r.x === 0 && r.y === 0 && r.w === w.w && r.h === w.
   ok('Split view and the preview share the width without overlapping', r.editors > 300 && r.preview > 300 && !r.overlap, JSON.stringify(r));
   await page.evaluate(() => __tf.closeSplit());
 
+  // ---------- what it looks like, not just where it is (a 1920 x 1080 screen) ----------
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.evaluate((md) => { __tf.closeSplit && __tf.closeSplit(); const t = __tf.tabs.find((x) => x.name === 'notes.md'); t.model.setValue(md + '\n\n| Shortcut | Action | When to use it |\n|---|---|---|\n| `Ctrl + B` | Go to declaration | Jump from a call to the method or class it refers to, including into library sources |'); __tf.activate(t); __tf.setPreview(true); }, MD);
+  await page.waitForTimeout(300);
+  const look = () => page.evaluate(() => {
+    const pv = document.getElementById('preview').getBoundingClientRect();
+    const sc = document.getElementById('preview-body');
+    const pad = parseFloat(getComputedStyle(sc).paddingLeft) + parseFloat(getComputedStyle(sc).paddingRight);
+    const doc = document.getElementById('preview-doc').getBoundingClientRect();
+    const wrap = document.querySelector('.md-table-wrap').getBoundingClientRect();
+    const tools = document.querySelector('.md-table-tools').getBoundingClientRect();
+    return { pvW: Math.round(pv.width), scrollRight: Math.round(sc.getBoundingClientRect().right), pvRight: Math.round(pv.right), inner: Math.round(sc.clientWidth - pad), docW: Math.round(doc.width), tableW: Math.round(wrap.width), toolsRight: Math.round(tools.right), tableRight: Math.round(wrap.right) };
+  });
+  await page.evaluate(() => { document.getElementById('preview').style.flexBasis = '85%'; });
+  await page.waitForTimeout(200);
+  r = await look();
+  ok('Stretched preview: the scrollbar is at its right edge and the text uses the whole width (no blank band)', r.scrollRight === r.pvRight && r.docW >= r.inner - 2, JSON.stringify(r));
+  ok('Table buttons sit at their own table\'s right edge, and short tables are not tiny', r.toolsRight === r.tableRight && r.tableW >= 560, JSON.stringify(r));
+  await page.keyboard.press('Alt+Shift+P');
+  await page.waitForTimeout(300);
+  r = await look();
+  ok('Full screen: the reading column uses most of a 1920 px screen, scrollbar at the screen edge', r.docW >= 1300 && r.scrollRight === 1920, JSON.stringify(r));
+  r = await page.evaluate(() => { const fs = parseFloat(getComputedStyle(document.getElementById('preview-doc')).fontSize); const side = 14; const t = document.querySelector('.md-table-wrap').getBoundingClientRect(); const name = document.getElementById('pv-name').textContent; return { fs, side, tableW: Math.round(t.width), name }; });
+  ok('Full screen: larger text, tables at least 980 px wide, the file name in the header', r.fs > r.side && r.tableW >= 980 && r.name === 'notes.md', JSON.stringify(r));
+  await page.keyboard.press('Escape');
+  // the comparison: one clean divider between the two sides
+  await page.evaluate(() => { const a = __tf.tabs.find((x) => x.name === 'notes.md'); const b = __tf.tabs.find((x) => x.name === 'other.txt'); __tf.activate(a); __tf.compareWith(b); });
+  await page.waitForTimeout(500);
+  r = await page.evaluate(() => { const eds = [...document.querySelectorAll('#diff .monaco-diff-editor .editor.original, #diff .monaco-diff-editor .editor.modified')].map((e) => e.getBoundingClientRect()); return eds.length === 2 ? { gap: Math.round(eds[1].left - eds[0].right) } : { gap: null, n: eds.length }; });
+  ok('Comparison: no empty strip between the two sides', r.gap !== null && r.gap <= 8, JSON.stringify(r));
+  await page.evaluate(() => __tf.closeCompare && __tf.closeCompare());
+  await page.evaluate(() => { if (document.getElementById('diff')) document.querySelector('#diff button[title="Close comparison"]').click(); });
+
   // ---------- phone ----------
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(250);

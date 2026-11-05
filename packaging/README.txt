@@ -213,3 +213,10 @@ RESIZABLE PREVIEW AND FULL SCREEN (0.12.0)
   and position it had. Alt+P still shows / hides the preview beside the editor.
   Also: double-click the sidebar edge to reset its width, and settings changed just
   before closing the app are no longer lost.
+
+PREVIEW LAYOUT FIXES (0.12.1)
+  The preview uses the width you give it: no blank band on the right when it is
+  stretched, and its scrollbar sits at the edge. Full screen is a proper reading view:
+  a wide column, larger text, bigger tables and the file name in the header. Table
+  buttons (Copy table / Edit as table) now sit at their own table's corner. The
+  comparison view no longer shows an empty strip between its two sides.
