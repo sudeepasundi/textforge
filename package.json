@@ -1,7 +1,7 @@
 {
   "name": "textforge",
   "productName": "TextForge",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "A log-aware text editor for backend developers",
   "main": "main.js",
   "scripts": {
@@ -19,6 +19,7 @@
     "test:snap": "node test/snap.e2e.js",
     "test:files": "node test/files.e2e.js",
     "test:fullscreen": "node test/fullscreen.e2e.js",
+    "test:querybar": "node test/querybar.e2e.js",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "package:tauri": "tauri build --no-bundle"

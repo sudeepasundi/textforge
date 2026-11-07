@@ -233,3 +233,20 @@ TAURI PREVIEW BUILD (0.13.0)
   Known differences in the preview: dragging a file from Explorer into the window
   opens a copy (Save asks where to save; File > Open keeps the link to the file),
   and hovering the maximize button does not show Windows snap layouts (Win+Z does).
+
+QUERY BAR, TIME RANGE CHIP AND RESULT TABS (0.14.0)
+  The title bar now holds one query bar (Ctrl+K). Type a filter and press Enter; each
+  part becomes a chip you can remove with its x (or Backspace in the empty box):
+    level:error   level:warn+   logger:Payment   trace:c3e09f1a   took>1000   took>1.5s
+    after:10:15   before:10:17   time:10:15..10:17   -healthcheck   "a phrase"   re:regex
+  Start with > to run a command (for example >split). In a file that is not a log, the
+  box finds text instead.
+  The time range is its own chip with a clock: drag on the timeline to set it, and
+  remove the chip or double-click the timeline to clear it.
+  "4 errors" and "3 warnings" on the timeline are buttons: one click shows only that
+  level, a second click shows everything again.
+  File tabs moved to their own row under the title bar. The status bar says how many
+  entries the filter shows, with Copy shown and Clear filter.
+  Results under the editor keep a tab per kind (auto tables / extract, table view, find
+  in tabs), so you can switch between them without losing either.
+  On a phone the query bar gets its own row under the title bar.

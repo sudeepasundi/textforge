@@ -161,9 +161,6 @@ svg.logo { stroke: none; fill: none; }
 #signal .cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--fg); opacity: .5; pointer-events: none; }
 #signal .tip { position: absolute; top: 4px; transform: translateX(8px); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 2px 7px; font: 11px var(--mono); white-space: nowrap; pointer-events: none; z-index: 3; }
 
-#filterbar { display: flex; align-items: center; gap: 8px; padding: 5px 12px; background: var(--accent-soft); border-bottom: 1px solid var(--line); font-size: 12px; flex: none; }
-#filterbar b { font-weight: 600; }
-#filterbar button { padding: 1px 8px; font-size: 12px; }
 
 #panel { flex: none; height: 300px; display: flex; flex-direction: column; border-top: 1px solid var(--line); background: var(--surface); }
 #panel-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
@@ -701,3 +698,99 @@ body.tauri #topbar { position: relative; }
 #wc .wc-btn:active { background: var(--line); }
 #wc .wc-close:hover { background: #c42b1c; color: #fff; }
 #wc .wc-close:active { background: #b22a1b; color: #fff; }
+
+/* ---- design D: query bar in the title bar, tab row, timeline counts, results tabs (0.14.0) ---- */
+#topbar .brand { flex: none; }
+#filterbar.querybar {
+  position: relative; flex: 1 1 auto; min-width: 0; max-width: 760px; margin: 6px auto; padding: 0 6px 0 8px;
+  display: flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+  font-size: 12px; cursor: text; -webkit-app-region: no-drag;
+}
+body.frameless #topbar #filterbar { -webkit-app-region: no-drag; }
+#filterbar.focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+#filterbar.active { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+#filterbar.has-error { border-color: var(--err); }
+#filterbar .qb-icon { width: 14px; height: 14px; flex: none; color: var(--muted); fill: none; stroke: currentColor; stroke-width: 2; }
+#filterbar.active .qb-icon { color: var(--accent-text); }
+.qb-chips { display: flex; gap: 4px; min-width: 0; overflow: hidden; flex: 0 1 auto; }
+.qb-chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 2px 0 7px; border-radius: 4px; flex: none;
+  max-width: 260px; background: var(--accent-soft); border: 1px solid transparent; color: var(--fg); font: 12px var(--mono); white-space: nowrap; cursor: default;
+}
+.qb-chip b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.qb-chip .qb-k { color: var(--muted); }
+.qb-chip.time { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.qb-chip.time svg { width: 12px; height: 12px; flex: none; fill: none; stroke: var(--accent-text); stroke-width: 2; }
+.qb-chip .qb-x { width: 18px; height: 18px; padding: 0; border: none; border-radius: 3px; background: none; color: var(--muted); font-size: 14px; line-height: 1; display: grid; place-items: center; }
+.qb-chip .qb-x:hover { background: var(--raised); color: var(--fg); }
+#qb-input { flex: 1 1 120px; min-width: 60px; height: 26px; padding: 0; border: none; outline: none; background: transparent; color: var(--fg); font: 12px var(--mono); }
+#qb-input::placeholder { color: var(--muted); opacity: .9; }
+.qb-count { flex: none; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#filterbar .qb-clear { flex: none; width: 22px; height: 22px; }
+.qb-key { flex: none; font-size: 10.5px; color: var(--muted); }
+.qb-help {
+  position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; right: 0; padding: 6px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  background: var(--raised); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 14px 40px rgba(0,0,0,.35); cursor: default;
+}
+.qb-help-head { grid-column: 1 / -1; padding: 4px 8px 6px; color: var(--muted); }
+.qb-ex { display: flex; gap: 10px; align-items: baseline; justify-content: flex-start; padding: 5px 8px; border: none; border-radius: 5px; background: none; color: var(--fg); text-align: left; font-size: 12px; }
+.qb-ex:hover { background: var(--accent-soft); }
+.qb-ex code { font: 12px var(--mono); color: var(--accent-text); white-space: nowrap; }
+.qb-ex span { color: var(--muted); }
+
+/* the file tabs get their own row above the timeline */
+#tabrow { display: flex; height: 34px; flex: none; background: var(--surface); border-bottom: 1px solid var(--line); }
+#tabrow #tabs { flex: 1; }
+#tabrow .tab.active::after { bottom: 0; }
+body.compact #tabrow { height: 30px; }
+
+/* timeline counts are filters */
+.signal-meta .sig-pill {
+  pointer-events: auto; height: 17px; padding: 0 7px; margin-top: -1px; border-radius: 9px; border: 1px solid transparent; background: none;
+  font: 11px var(--mono); line-height: 15px; cursor: pointer;
+}
+.signal-meta .sig-pill.e { color: var(--err); }
+.signal-meta .sig-pill.w { color: var(--warn); }
+.signal-meta .sig-pill:hover { border-color: currentColor; }
+.signal-meta .sig-pill.on { border-color: currentColor; background: color-mix(in srgb, currentColor 14%, transparent); font-weight: 600; }
+
+/* filter summary in the status bar */
+#st-filter { display: flex; align-items: center; gap: 4px; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); white-space: nowrap; min-width: 0; overflow: hidden; }
+#st-filter[hidden] { display: none; }
+#st-filter b { color: var(--fg); font-weight: 600; }
+#st-filter .st-err { color: var(--err); overflow: hidden; text-overflow: ellipsis; }
+#st-filter .st-warn { color: var(--warn); }
+#statusbar #st-filter button { color: var(--accent-text); }
+
+/* results drawer tabs */
+#panel-tabs { display: flex; gap: 2px; min-width: 0; flex: 0 1 auto; overflow: hidden; margin-left: -6px; }
+#panel-tabs[hidden] { display: none; }
+.ptab { display: flex; align-items: center; min-width: 0; border-radius: 6px; color: var(--muted); }
+.ptab.on { background: var(--raised); color: var(--fg); box-shadow: inset 0 -2px 0 var(--accent); }
+.ptab button { border: none; background: none; color: inherit; padding: 4px 8px; font-size: 12px; }
+.ptab .ptab-name { display: flex; gap: 6px; align-items: baseline; min-width: 0; padding-right: 2px; }
+.ptab-kind { font-weight: 600; white-space: nowrap; }
+.ptab-title { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .8; }
+.ptab .ptab-x { padding: 2px 6px; border-radius: 4px; }
+.ptab .ptab-x:hover { background: var(--line); }
+
+@media (max-width: 760px) {
+  #filterbar.querybar { margin: 5px 4px; }
+  .qb-key { display: none; }
+  /* the query bar gets its own full-width row under the title bar */
+  #topbar { flex-wrap: wrap; height: auto; }
+  #topbar .brand, #topbar .top-actions { height: 40px; }
+  #topbar .top-actions { margin-left: auto; }
+  #filterbar.querybar { order: 3; flex: 0 0 calc(100% - 12px); max-width: calc(100% - 12px); height: 32px; margin: 0 6px 6px; box-sizing: border-box; }
+  #side { top: 78px !important; }
+  .qb-help { grid-template-columns: 1fr; position: fixed; left: 8px; right: 8px; top: 82px; }
+  /* chips scroll sideways (swipe) instead of being squeezed; the count stays in the bar */
+  .qb-chips { overflow-x: auto; scrollbar-width: none; flex: 0 1 auto; }
+  .qb-chips::-webkit-scrollbar { display: none; }
+  .qb-chip { max-width: 170px; }
+  #qb-input { flex-basis: 70px; }
+  #st-filter { display: none !important; }
+}
+@media (max-width: 1100px) { .qb-key { display: none; } #palette-btn span, #palette-btn kbd { display: none; } #palette-btn { min-width: 0; } }
+body.compact #filterbar.querybar { margin: 3px auto; }
+body.compact #qb-input { height: 22px; }
