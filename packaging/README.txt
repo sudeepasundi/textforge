@@ -250,3 +250,12 @@ QUERY BAR, TIME RANGE CHIP AND RESULT TABS (0.14.0)
   Results under the editor keep a tab per kind (auto tables / extract, table view, find
   in tabs), so you can switch between them without losing either.
   On a phone the query bar gets its own row under the title bar.
+
+PATTERNS FOUND, TOOLBAR ON SELECTED TEXT, COPILOT BADGE (0.15.0)
+  Extract data (Ctrl+2) now lists the message patterns of the log straight away, with
+  row counts and columns. One click opens that pattern's table under the editor. (Files
+  over 20,000 lines wait for Build tables so the panel stays quick.)
+  Selecting text shows a small toolbar just above it: Table from selection, Copy masked,
+  Show only entries with this (for a short one-line selection in a log) and Ask Copilot.
+  Turn it off or on again from the command palette ("Hide the toolbar on selected text").
+  The Copilot button shows a red number: how many errors the current log has.

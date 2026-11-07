@@ -1,5 +1,5 @@
-/* 0.14.0 (design D): query bar with chips in the title bar, time-range chip, timeline count filters,
- * results tabs, filter summary in the status bar. Usage: node test/querybar.e2e.js [selfhost URL] */
+/* 0.14.0-0.15.0 (design D): query bar with chips in the title bar, time-range chip, timeline count filters,
+ * results tabs, status-bar summary, patterns found, toolbar on selected text, Copilot badge. Usage: node test/querybar.e2e.js [selfhost URL] */
 const path = require('path');
 let playwright;
 try { playwright = require('playwright'); } catch { playwright = require(path.join(process.env.HOME || '', '.npm-global/lib/node_modules/playwright')); }
@@ -135,6 +135,50 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   await page.waitForTimeout(200);
   r = await page.evaluate(() => ({ n: __tf.panelTabs.length, tabsShown: !document.getElementById('panel-tabs').hidden, title: document.getElementById('panel-title').textContent, panel: !document.getElementById('panel').hidden }));
   ok('Closing one result keeps the other; with one left the plain title comes back', r.n === 1 && !r.tabsShown && r.panel && /pattern/.test(r.title), JSON.stringify(r));
+
+  // ---- 0.15.0: patterns found, toolbar on selected text, Copilot badge ----
+  await page.evaluate(() => { __tf.clearFilter(); __tf.showView('extract'); });
+  await page.waitForTimeout(400);
+  r = await page.evaluate(() => ({ head: (document.querySelector('.pf-group h3') || {}).textContent, n: document.querySelectorAll('.pf-item').length, first: (document.querySelector('.pf-item .pf-count') || {}).textContent }));
+  ok('Extract data lists the patterns found, with row counts, without pressing anything', /Patterns found · \d+/.test(r.head) && r.n >= 5 && /rows?$/.test(r.first), JSON.stringify(r));
+  await page.click('.pf-item >> nth=1');
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => ({ panel: !document.getElementById('panel').hidden, sel: __tf.autoState && __tf.autoState.selected && __tf.autoState.selected.count, on: [...document.querySelectorAll('.pf-item')].findIndex((x) => x.classList.contains('on')), rows: document.querySelectorAll('#panel-body table tr').length }));
+  ok('One click on a pattern opens its table under the editor and marks it in the list', r.panel && r.sel > 0 && r.on === 1 && r.rows > 1, JSON.stringify(r));
+  await page.evaluate(() => __tf.hideSide && __tf.hideSide());
+  const sel = await page.evaluate(() => { const ed = __tf.editor; ed.revealLineInCenter(9); const a = ed.getScrolledVisiblePosition({ lineNumber: 9, column: 1 }); const c = ed.getScrolledVisiblePosition({ lineNumber: 10, column: 40 }); const r = ed.getDomNode().getBoundingClientRect(); return { x1: r.left + a.left + 2, y1: r.top + a.top + 5, x2: r.left + c.left, y2: r.top + c.top + 5, line9: r.top + a.top }; });
+  await page.mouse.move(sel.x1, sel.y1); await page.mouse.down(); await page.mouse.move(sel.x2, sel.y2, { steps: 6 }); await page.mouse.up();
+  await page.waitForTimeout(450);
+  r = await page.evaluate(() => { const n = document.querySelector('.selbar'); const b = n.getBoundingClientRect(); return { on: n.classList.contains('on'), btns: [...n.querySelectorAll('.sb-btn')].filter((x) => !x.hidden).map((x) => x.textContent), bottom: b.bottom }; });
+  ok('Selecting lines shows a toolbar just above them', r.on && r.btns.includes('Table from selection') && r.btns.includes('Ask Copilot') && r.btns.includes('Copy masked') && r.bottom <= sel.line9 + 2 && r.bottom >= sel.line9 - 40, JSON.stringify(Object.assign(r, { line9: sel.line9 })));
+  ok('"Show only entries with this" is offered only for a short one-line selection', !r.btns.includes('Show only entries with this'), JSON.stringify(r.btns));
+  await page.click('.selbar .sb-btn:has-text("Table from selection")');
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => ({ on: document.querySelector('.selbar').classList.contains('on'), tabs: __tf.panelTabs.map((t) => t.mode) }));
+  ok('Table from selection opens a table view (as its own result tab) and hides the toolbar', !r.on && r.tabs.includes('table'), JSON.stringify(r));
+  await page.evaluate(() => { const ed = __tf.editor; ed.focus(); ed.setPosition({ lineNumber: 9, column: 1 }); });
+  await page.keyboard.press('End');
+  await page.keyboard.down('Shift'); for (let i = 0; i < 16; i++) await page.keyboard.press('ArrowLeft'); await page.keyboard.up('Shift');
+  await page.waitForTimeout(450);
+  r = await page.evaluate(() => ({ on: document.querySelector('.selbar').classList.contains('on'), only: !document.querySelector('.selbar .sb-btn:nth-child(3)').hidden, text: __tf.active.model.getValueInRange(__tf.editor.getSelection()) }));
+  ok('Selecting with the keyboard shows it too, with "Show only entries with this" for one line', r.on && r.only, JSON.stringify(r));
+  await page.click('.selbar .sb-btn:has-text("Show only entries with this")');
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => ({ trace: __tf.active.filter.trace, chips: [...document.querySelectorAll('#filterbar .qb-chip')].map((c) => c.innerText.replace(/\s+/g, ' ')) }));
+  ok('"Show only entries with this" filters the log and shows a chip', r.trace && r.chips.some((c) => c.startsWith('trace:')), JSON.stringify(r));
+  await page.evaluate(() => __tf.clearFilter());
+  await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => document.querySelector('.selbar').classList.contains('on'));
+  ok('The toolbar goes away when the selection does', r === false, String(r));
+  r = await page.evaluate(() => { const b = document.querySelector('#cp-fab .cp-badge'); return { n: b && b.textContent, title: document.getElementById('cp-fab').title, errors: __tf.active.an.counts.ERROR }; });
+  ok('The Copilot button shows how many errors this log has', r.n === String(r.errors) && /4 errors/.test(r.title), JSON.stringify(r));
+  await page.evaluate(() => __tf.activate(__tf.tabs.find((t) => t.name === 'notes.md')));
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => !!document.querySelector('#cp-fab .cp-badge'));
+  ok('No badge on a file without errors', r === false, String(r));
+  await page.evaluate(() => { __tf.activate(__tf.tabs.find((t) => /sample/.test(t.name))); });
+  await page.waitForTimeout(200);
 
   // ---- appearance: light theme and phone ----
   await page.evaluate(() => { __tf.setTheme('paper'); __tf.applyQuery('level:error'); });
