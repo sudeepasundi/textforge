@@ -2579,6 +2579,8 @@
 
   function loadCopilot() {
     if (copilotView) return copilotView;
+    // Tauri: Copilot is a native webview that the API keeps positioned over this placeholder.
+    if (api.copilotView) { copilotView = api.copilotView(settings.copilotUrl); return copilotView; }
     const wv = document.createElement('webview');
     wv.setAttribute('partition', 'persist:copilot');
     wv.setAttribute('allowpopups', '');
@@ -2591,6 +2593,7 @@
   async function injectPrompt(text) {
     const wv = copilotView;
     if (!wv) return false;
+    if (api.copilotInsert) return api.copilotInsert(text).catch(() => false);
     try {
       wv.focus();
       const ok = await wv.executeJavaScript(`(() => {

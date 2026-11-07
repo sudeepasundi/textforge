@@ -37,6 +37,22 @@ jobs:
           node build-web.js
           Copy-Item packaging/README.txt web-dist/selfhost/README.txt
           Compress-Archive -Path web-dist/selfhost -DestinationPath "dist/TextForge-$v-web.zip"
+      # Tauri preview (0.13.0+): one small exe, uses the WebView2 that ships with Windows.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Build Tauri preview
+        run: npm run package:tauri
+      - name: Zip Tauri preview
+        shell: pwsh
+        run: |
+          $v = "${{ steps.zip.outputs.version }}"
+          $out = "dist/TextForge-tauri-preview"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item src-tauri/target/release/textforge.exe "$out/TextForge.exe"
+          Copy-Item packaging/README.txt "$out/README.txt"
+          Copy-Item LICENSE "$out/LICENSE.txt"
+          Compress-Archive -Path $out -DestinationPath "dist/TextForge-$v-win-x64-tauri-preview.zip"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', steps.zip.outputs.version) }}
@@ -45,4 +61,5 @@ jobs:
           files: |
             dist/TextForge-*-win-x64-portable.zip
             dist/TextForge-*-web.zip
+            dist/TextForge-*-win-x64-tauri-preview.zip
           generate_release_notes: true

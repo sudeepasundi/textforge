@@ -154,6 +154,34 @@ COPILOT: Microsoft does not allow Copilot inside other web pages, so open it in 
 tab (Alt+4 > Open Copilot) and paste the prompts TextForge copies for you.
 `);
 
+// ---------------------------------------------------------------- Tauri desktop (0.13.0 preview)
+// Same page as the desktop Electron app, but window.api comes from tauri-api.js (Rust commands).
+// Tauri embeds this folder in the exe (src-tauri/tauri.conf.json -> frontendDist).
+const DK = path.join(OUT, 'desktop');
+fs.mkdirSync(DK, { recursive: true });
+copyDir(MONACO_SRC, path.join(DK, 'monaco/vs'), (p) => /\.map$/.test(p));
+copyDir(path.join(ROOT, 'fonts'), path.join(DK, 'fonts'));
+fs.writeFileSync(path.join(DK, 'style.css'), css);
+const desktopScripts = ['tables.js', 'markdown.js', 'logs.js', 'tauri-api.js', 'renderer.js'];
+for (const s of desktopScripts) fs.copyFileSync(path.join(ROOT, s), path.join(DK, s));
+fs.writeFileSync(path.join(DK, 'favicon.svg'), FAVICON_SVG);
+fs.writeFileSync(path.join(DK, 'index.html'), `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TextForge</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+${bodyMarkup}
+  <script>window.TF_WEB = { target: 'tauri', monacoBase: 'monaco' };</script>
+  <script src="monaco/vs/loader.js"></script>
+${desktopScripts.map((s) => `  <script src="${s}"></script>`).join('\n')}
+</body>
+</html>
+`);
+
 // ---------------------------------------------------------------- hosted single page
 const AR = path.join(OUT, 'artifact');
 fs.mkdirSync(AR, { recursive: true });
@@ -180,5 +208,6 @@ fs.writeFileSync(path.join(AR, 'TextForge.html'), arHtml);
 
 const kb = (p) => Math.round(fs.statSync(p).size / 1024) + ' KB';
 console.log('self-host  ->', path.relative(ROOT, SH), '(' + listFiles(SH).length + ' files)');
+console.log('desktop    ->', path.relative(ROOT, DK), '(' + listFiles(DK).length + ' files, for Tauri)');
 console.log('hosted     ->', path.relative(ROOT, path.join(AR, 'TextForge.html')), kb(path.join(AR, 'TextForge.html')));
 console.log('monaco', MONACO_VERSION, 'sw build', version);

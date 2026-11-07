@@ -220,3 +220,16 @@ PREVIEW LAYOUT FIXES (0.12.1)
   a wide column, larger text, bigger tables and the file name in the header. Table
   buttons (Copy table / Edit as table) now sit at their own table's corner. The
   comparison view no longer shows an empty strip between its two sides.
+
+TAURI PREVIEW BUILD (0.13.0)
+  TextForge is moving to a new desktop engine (Tauri, written in Rust). This release
+  adds a preview build next to the usual one; the usual Electron download is
+  unchanged and still the main version.
+  The preview is a single small TextForge.exe (about a tenth of the size). Like the
+  main download it needs no installer: unzip and double-click. It uses the Edge
+  WebView2 that comes with Windows 11.
+  What to try: open, save and rename files, live tail, files changing on disk, split
+  view, full screen, and the Copilot pane (sign in once; the sign-in is kept).
+  Known differences in the preview: dragging a file from Explorer into the window
+  opens a copy (Save asks where to save; File > Open keeps the link to the file),
+  and hovering the maximize button does not show Windows snap layouts (Win+Z does).
