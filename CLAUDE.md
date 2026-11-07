@@ -78,6 +78,8 @@ What it does that Notepad++ doesn't:
 | `test/` | Unit tests (`*.test.js`) and browser/desktop suites (`*.e2e.js`); see Testing. |
 | `.github/workflows/` | `pages.yml` (website) and `release.yml` (Windows build + Release). |
 | `.gitattributes` | Forces LF everywhere (the Windows CI checkout broke CRLF-sensitive tests once). |
+| `src-tauri/` | Tauri 2 desktop preview (0.13.0+): `src/main.rs` is the Rust side of `window.api` (file IO with the same encodings and 500 MB limit as `main.js`, session, clipboard, Copilot child webview). `capabilities/main.json` grants permissions to the `main` webview only; the Copilot webview gets none. |
+| `tauri-api.js` | The Tauri implementation of `window.api` (third one, next to `preload.js` and `web-api.js`). Built into `web-dist/desktop/` by `build-web.js`, which Tauri embeds in the exe. |
 
 ### `renderer.js` section map (approximate line numbers)
 
@@ -121,7 +123,14 @@ npm start                   # desktop app
 node build-web.js           # web builds into web-dist/
 npm run package:win         # dist/TextForge-win32-x64 (then prune node_modules except monaco-editor)
 npm test                    # unit tests: tables 15, logs 15, markdown 8, autotables 9
+npm run package:tauri       # Tauri preview: src-tauri/target/release/textforge.exe (needs Rust + MSVC build tools)
 ```
+
+**Tauri gotchas:** commands without `async` run on the window's thread: anything touching the disk is
+`async` and uses `background()`, and creating a webview from a sync command deadlocks on Windows.
+Native file drops are off (`disable_drag_drop_handler`) so HTML drag and drop (tabs, snap) works.
+To drive the exe with Playwright, start it with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`
+and use `chromium.connectOverCDP`; always put a timeout on the connection.
 
 Browser suites expect `web-dist/selfhost` served at `http://127.0.0.1:8765/`:
 

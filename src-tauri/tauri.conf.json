@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TextForge",
+  "version": "0.13.0",
+  "identifier": "io.github.sudeepasundi.textforge",
+  "build": {
+    "frontendDist": "../web-dist/desktop",
+    "beforeBuildCommand": "node build-web.js",
+    "beforeDevCommand": "node build-web.js"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "copyright": "Copyright (c) 2026 NUKE",
+    "shortDescription": "TextForge - log-aware text editor"
+  }
+}
