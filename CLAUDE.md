@@ -1,7 +1,15 @@
 # TextForge: project context for Claude Code
 
 This file is the hand-off for continuing work on TextForge. Read it fully before changing anything.
-Current version: **0.12.1** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
+Current version: **0.14.0** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
+
+**Direction (agreed 2026-11-07):** move to Tauri 2 + a Rust log engine (also WASM on the web) + Svelte/TypeScript,
+one phase per release; 0.13.0 added the Tauri preview. The UI follows design "D · Focus with tools" from the
+claude.ai canvas https://claude.ai/artifact/J7UR17eqQ8EwLDqtidqo6c: 0.14.0 built the query bar, tab row, timeline
+count filters, results tabs and status-bar summary; still to do from D: the "patterns found" list in Extract
+data, a toolbar on selected lines, and the Copilot badge.
+**Releases:** each release has its own branch `release/vX.Y.Z` (from the previous release branch or `main`),
+merged into `main` through a PR. The owner decides when to push; do not push unless asked.
 
 ## What TextForge is
 
@@ -108,6 +116,12 @@ command palette (~3628) · misc actions, keyboard shortcuts, init (~3745–end).
 - **Themes:** CSS custom properties on `:root`, set by `applyTheme()`. Contrast is computed:
   `bestOn()` for text on the accent, and `readableAccent()` for `--accent-text`, kept at or above
   4.5:1.
+- **Query bar (0.14.0):** `#filterbar` is now the query bar in the title bar (id kept for tests). Chips come from
+  `filterChips(tab.filter)`, each with the patch that removes it; typed text goes through `applyQuery()`. New filter
+  syntax needs both: a branch in `applyQuery()` and a chip in `filterChips()`. `filter.took` (ms) is applied after
+  `Logs.filterEntries` in `computeVisibility()`, like `filter.lines`.
+- **Results tabs (0.14.0):** `openPanel(mode, title)` keeps one tab per `mode`; switching stashes the DOM nodes of
+  `#panel-tools` / `#panel-body`, so code that fills the panel keeps using those ids as before.
 - **Commands:** add new features to the command palette list (`commands()` in the COMMAND PALETTE
   section) and give them a keyboard shortcut where it makes sense.
 - **Privacy:** no telemetry and no network calls except the Copilot pane and (on the web) loading
@@ -146,6 +160,7 @@ node test/workspace.e2e.js     # 22  panel resize, tab rename/reorder, multi-pan
 node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
 node test/files.e2e.js         # 19  Open files list
 node test/fullscreen.e2e.js    # 34  resize and full screen everywhere, including appearance checks
+node test/querybar.e2e.js      # 29  query bar chips, time chip, timeline count filters, result tabs, phone layout
 xvfb-run -a node test/ui-desktop.e2e.js   # 9  Electron: title bar, Copilot resize, full-screen window restore
 ```
 

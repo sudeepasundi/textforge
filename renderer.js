@@ -1256,7 +1256,7 @@
   // LOG ANALYSIS
   // ======================================================================
   function emptyFilter() {
-    return { levels: new Set(Logs.LEVEL_CHIPS), include: '', includeMode: 'any', exclude: '', logger: '', trace: '', from: '', to: '' };
+    return { levels: new Set(Logs.LEVEL_CHIPS), include: '', includeMode: 'any', exclude: '', logger: '', trace: '', from: '', to: '', took: '' };
   }
   // Multi-line filter boxes: each non-empty line is one pattern.
   const filterLines = (v) => String(v || '').split('\n').map((x) => x.trim()).filter(Boolean);
@@ -1271,7 +1271,7 @@
   }
 
   function filterActive(f) {
-    return !!f.lines || f.levels.size !== Logs.LEVEL_CHIPS.length || filterLines(f.include).length || filterLines(f.exclude).length || f.logger || filterLines(f.trace).length || f.from || f.to;
+    return !!f.lines || f.levels.size !== Logs.LEVEL_CHIPS.length || filterLines(f.include).length || filterLines(f.exclude).length || f.logger || filterLines(f.trace).length || f.from || f.to || !!f.took;
   }
   function safeRegex(src) {
     if (!src) return { re: null };
@@ -1328,7 +1328,18 @@
         if (!hit) an.vis[i] = 0;
       });
     }
+    if (an.vis && f.took) {
+      // took>N: entries that report a duration ("took 1534ms", "took: 2.1 s") of at least N ms
+      const min = Number(f.took);
+      an.entries.forEach((e, i) => {
+        if (!an.vis[i]) return;
+        const m = TOOK_RE.exec(an.lines[e.start] || '');
+        if (!m || tookMs(m) < min) an.vis[i] = 0;
+      });
+    }
   }
+  const TOOK_RE = /\btook[\s:=]*(\d+(?:\.\d+)?)\s*(ms|s|sec|seconds?)?\b/i;
+  const tookMs = (m) => Number(m[1]) * (m[2] && /^s/i.test(m[2]) ? 1000 : 1);
 
   const scheduleAnalysis = debounce((tab) => {
     if (!tabs.includes(tab)) return;
@@ -1413,31 +1424,192 @@
     if (currentView === 'insights') renderInsights();
   }
 
+  // ---------- query bar (0.14.0): the active filter as chips in the title bar; type to add more ----------
+  // Syntax: level:error  level:warn+  logger:Payment  thread:exec-3  trace:<id>  after:10:15  before:10:17
+  // time:10:15..10:17  took>1000  -word (hide)  re:<regex>  "a phrase"  plain words.  Starting with > runs a command.
+  const LEVEL_ORDER = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'];
+  const LEVEL_WORDS = { error: 'ERROR', err: 'ERROR', fatal: 'ERROR', warn: 'WARN', warning: 'WARN', info: 'INFO', debug: 'DEBUG', trace: 'TRACE', other: 'OTHER' };
+  const reEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const reUnescape = (s) => s.replace(/\\(.)/g, '$1');
+  const shortTime = (v) => String(v).replace(/^\d{4}-\d{2}-\d{2}[ T]/, '');
+  const CLOCK_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+
+  function parseLevels(v) {
+    const out = new Set();
+    for (let w of v.toLowerCase().split(/[,|]/).map((x) => x.trim()).filter(Boolean)) {
+      const plus = w.endsWith('+');
+      if (plus) w = w.slice(0, -1);
+      const lv = LEVEL_WORDS[w];
+      if (!lv) return null;
+      if (plus && LEVEL_ORDER.includes(lv)) LEVEL_ORDER.slice(LEVEL_ORDER.indexOf(lv)).forEach((x) => out.add(x));
+      else out.add(lv);
+    }
+    return out.size ? out : null;
+  }
+  function parseDuration(v) {
+    const m = /^(\d+(?:\.\d+)?)\s*(ms|s|sec)?$/i.exec(v.trim());
+    return m ? Math.round(Number(m[1]) * (m[2] && /^s/i.test(m[2]) ? 1000 : 1)) : null;
+  }
+
+  // The active filter as removable chips. Each chip knows the patch that removes it.
+  function filterChips(f) {
+    const chips = [];
+    const without = (key, p) => ({ [key]: filterLines(f[key]).filter((x) => x !== p).join('\n') });
+    if (f.from || f.to) {
+      chips.push({ key: 'time', val: (f.from ? shortTime(f.from) : 'start') + ' to ' + (f.to ? shortTime(f.to) : 'end'), time: true,
+        title: 'Drag on the timeline to change the range. Double-click the timeline, or ×, to clear it.', clear: { from: '', to: '' } });
+    }
+    if (f.levels.size !== Logs.LEVEL_CHIPS.length) chips.push({ key: 'level', val: Array.from(f.levels).map((x) => x.toLowerCase()).join(', ') || 'none', clear: { levels: new Set(Logs.LEVEL_CHIPS) } });
+    if (f.logger) chips.push({ key: 'logger', val: f.logger, clear: { logger: '' } });
+    const ids = filterLines(f.trace);
+    if (ids.length) chips.push({ key: 'trace', val: ids.length === 1 ? ids[0] : ids.length + ' IDs', title: ids.join('\n'), clear: { trace: '' } });
+    for (const p of filterLines(f.include)) chips.push({ key: f.includeMode === 'all' && filterLines(f.include).length > 1 ? 'all' : 'text', val: reUnescape(p), title: 'Pattern: ' + p, clear: without('include', p) });
+    for (const p of filterLines(f.exclude)) chips.push({ key: 'not', val: reUnescape(p), title: 'Hidden: ' + p, clear: without('exclude', p) });
+    if (f.took) chips.push({ key: 'took', op: '>', val: f.took + ' ms', clear: { took: '' } });
+    if (f.lines) chips.push({ key: 'lines', val: 'from the results', clear: { lines: null } });
+    return chips;
+  }
+
   function renderFilterBar() {
     const bar = $('#filterbar');
-    const an = active && isLogTab(active) ? active.an : null;
-    if (!an || !filterActive(active.filter)) { bar.hidden = true; return; }
+    const box = bar.querySelector('.qb-chips');
+    const input = $('#qb-input');
+    const cnt = bar.querySelector('.qb-count');
+    const clr = bar.querySelector('.qb-clear');
+    const st = $('#st-filter');
+    const log = !!(active && isLogTab(active));
+    const an = log ? active.an : null;
+    const filtering = !!(an && filterActive(active.filter));
+    input.placeholder = !log ? 'Find in this tab, or type > for a command'
+      : filtering ? 'Add a filter…' : 'Filter: level:error  logger:Payment  took>1000  after:10:15  -noise';
+    box.innerHTML = '';
+    if (!filtering) {
+      cnt.hidden = clr.hidden = st.hidden = true;
+      bar.classList.remove('active');
+      return;
+    }
+    for (const c of filterChips(active.filter)) {
+      const chip = h('span', { class: 'qb-chip' + (c.time ? ' time' : ''), title: c.title || '' },
+        h('span', { class: 'qb-k' }, c.key + (c.op || ':')), h('b', null, c.val),
+        h('button', { class: 'qb-x', title: 'Remove', 'aria-label': 'Remove the ' + c.key + ' filter', onclick: (e) => { e.stopPropagation(); setFilter(c.clear); if (currentView === 'insights') renderInsights(); } }, '×'));
+      if (c.time) chip.insertAdjacentHTML('afterbegin', CLOCK_SVG);
+      box.append(chip);
+    }
     const shown = an.vis ? an.vis.reduce((a, b) => a + b, 0) : an.entries.length;
-    const f = active.filter;
-    const parts = [];
-    if (f.levels.size !== Logs.LEVEL_CHIPS.length) parts.push('levels: ' + Array.from(f.levels).map((x) => x.toLowerCase()).join(', '));
-    const describe = (v) => { const l = filterLines(v); return l.length === 1 ? '"' + l[0] + '"' : l.length + ' patterns'; };
-    if (filterLines(f.include).length) parts.push('matching ' + (filterLines(f.include).length > 1 ? (f.includeMode === 'all' ? 'all of ' : 'any of ') : '') + describe(f.include));
-    if (filterLines(f.exclude).length) parts.push('without ' + describe(f.exclude));
-    if (f.logger) parts.push('logger/thread "' + f.logger + '"');
-    if (filterLines(f.trace).length) parts.push(filterLines(f.trace).length > 1 ? filterLines(f.trace).length + ' IDs' : 'ID "' + filterLines(f.trace)[0] + '"');
-    if (f.from || f.to) parts.push('time ' + (f.from || 'start') + ' to ' + (f.to || 'end'));
-    if (f.lines) parts.push('lines from the extract results');
-    bar.innerHTML = '';
-    bar.append(...[
-      h('span', null, 'Showing ', h('b', null, shown.toLocaleString()), ' of ' + an.entries.length.toLocaleString() + ' entries'),
-      h('span', { style: 'color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1' }, parts.join(', ')),
-      an.filterError ? h('span', { style: 'color:var(--err)' }, 'Invalid regex: ' + an.filterError) : null,
-      shown === 0 ? h('span', { style: 'color:var(--warn)' }, 'Nothing matches, so the full log is shown') : null,
+    const total = an.entries.length.toLocaleString();
+    cnt.textContent = shown.toLocaleString() + ' of ' + total;
+    cnt.title = shown.toLocaleString() + ' of ' + total + ' entries shown';
+    cnt.hidden = clr.hidden = false;
+    bar.classList.add('active');
+    bar.classList.toggle('has-error', !!an.filterError);
+    st.innerHTML = '';
+    st.append(...[
+      h('span', null, h('b', null, shown.toLocaleString()), ' of ' + total + ' entries shown'),
+      an.filterError ? h('span', { class: 'st-err' }, 'Invalid regex: ' + an.filterError) : null,
+      shown === 0 ? h('span', { class: 'st-warn' }, 'Nothing matches, so the full log is shown') : null,
       h('button', { onclick: copyShown, title: 'Copy only the entries the filter shows' }, 'Copy shown'),
-      h('button', { onclick: clearFilter }, 'Clear filter')].filter(Boolean));
-    bar.hidden = false;
+      h('button', { onclick: clearFilter, title: 'Show every entry again' }, 'Clear filter')].filter(Boolean));
+    st.hidden = false;
   }
+
+  // Typed text -> filter changes. Returns the parts it could not understand.
+  function applyQuery(text) {
+    const q = text.trim();
+    if (!q) return [];
+    if (q.startsWith('>')) { openPalette(q.slice(1).trim()); return []; }
+    if (!active) return [];
+    if (!isLogTab(active)) { findInEditor(q); return []; }
+    const an = analyze(active);
+    const ref = an && an.entries.find((e) => e.ts != null);
+    const validTime = (v) => Logs.parseTimeInput(v, ref ? ref.ts : null) != null;
+    const f = active.filter;
+    const patch = {};
+    const bad = [];
+    const add = (key, val) => {
+      const cur = filterLines(key in patch ? patch[key] : f[key]);
+      if (!cur.includes(val)) cur.push(val);
+      patch[key] = cur.join('\n');
+    };
+    const tokens = q.match(/-?[a-z]+(?::|>=|>)"[^"]*"|-?"[^"]*"|\S+/gi) || [];
+    for (let tok of tokens) {
+      const neg = tok.length > 1 && tok.startsWith('-');
+      if (neg) tok = tok.slice(1);
+      const m = /^([a-z]+)(:|>=|>)(.+)$/i.exec(tok);
+      const unq = (s) => s.replace(/^"(.*)"$/, '$1');
+      if (!m) { const v = unq(tok); add(neg ? 'exclude' : 'include', reEscape(v)); continue; }
+      const key = m[1].toLowerCase();
+      const val = unq(m[3]);
+      if ((key === 'level' || key === 'lvl') && m[2] === ':') { const lv = parseLevels(val); if (lv) patch.levels = lv; else bad.push(tok); }
+      else if (['logger', 'thread', 'class', 'service'].includes(key)) patch.logger = val;
+      else if (['trace', 'traceid', 'id', 'request', 'span'].includes(key)) add('trace', val);
+      else if (['after', 'from', 'since'].includes(key)) { if (validTime(val)) patch.from = val; else bad.push(tok); }
+      else if (['before', 'to', 'until'].includes(key)) { if (validTime(val)) patch.to = val; else bad.push(tok); }
+      else if (key === 'time') {
+        const [a, b] = val.split(/\.\.|\s+to\s+/i).map((x) => x.trim());
+        if (a && validTime(a)) patch.from = a; else if (a) bad.push(tok);
+        if (b && validTime(b)) patch.to = b; else if (b) bad.push(tok);
+      }
+      else if (key === 'took' && m[2] !== ':') { const ms = parseDuration(val); if (ms != null) patch.took = String(ms); else bad.push(tok); }
+      else if (key === 're' || key === 'regex') add(neg ? 'exclude' : 'include', val);
+      else if (key === 'not' || key === 'exclude') add('exclude', reEscape(val));
+      else if (key === 'text' || key === 'has') add(neg ? 'exclude' : 'include', reEscape(val));
+      else add(neg ? 'exclude' : 'include', reEscape(tok)); // unknown key: treat the whole thing as text, e.g. "orderId=90002"
+    }
+    if (Object.keys(patch).length) {
+      setFilter(patch);
+      if (currentView === 'insights') renderInsights();
+    }
+    if (bad.length) toast('Not understood: ' + bad.join(' ') + '. Times look like 10:15 or 10:15:30; levels like error or warn+; took>500ms.', 6000);
+    return bad;
+  }
+
+  function findInEditor(q) {
+    const fc = editor.getContribution('editor.contrib.findController');
+    if (!fc) return;
+    fc.start({ forceRevealReplace: false, seedSearchStringFromSelection: 'none', seedSearchStringFromNonEmptySelection: false, seedSearchStringFromGlobalClipboard: false, shouldFocus: 0, shouldAnimate: true, updateSearchScope: false, loop: true });
+    fc.getState().change({ searchString: q }, false);
+    editor.focus();
+  }
+
+  const QB_EXAMPLES = [
+    ['level:error', 'only errors'], ['level:warn+', 'warnings and errors'], ['logger:Payment', 'logger or thread contains'],
+    ['trace:c3e09f1a', 'one request across the log'], ['after:10:15 before:10:17', 'a time range'], ['took>1000', 'calls that took 1 s or more'],
+    ['-healthcheck', 'hide entries with a word'], ['re:timed? ?out', 'a regular expression'], ['> split', 'run a command'],
+  ];
+  function wireQueryBar() {
+    const bar = $('#filterbar');
+    const input = $('#qb-input');
+    const help = bar.querySelector('.qb-help');
+    const showHelp = (on) => {
+      if (on && !help.childElementCount) {
+        help.append(h('div', { class: 'qb-help-head' }, 'Type a filter and press Enter. Each part becomes a chip.'));
+        for (const [ex, what] of QB_EXAMPLES) {
+          help.append(h('button', { class: 'qb-ex', onmousedown: (e) => { e.preventDefault(); input.value = (input.value ? input.value + ' ' : '') + ex.replace(/^> /, '>'); input.focus(); } }, h('code', null, ex), h('span', null, what)));
+        }
+      }
+      help.hidden = !on || !(active && isLogTab(active));
+    };
+    input.addEventListener('focus', () => { bar.classList.add('focus'); showHelp(!input.value); });
+    input.addEventListener('blur', () => { bar.classList.remove('focus'); showHelp(false); });
+    input.addEventListener('input', () => showHelp(!input.value));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const bad = applyQuery(input.value);
+        input.value = bad.join(' '); // keep only what was not understood, so it can be corrected
+        showHelp(false);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        if (input.value) input.value = ''; else { input.blur(); editor.focus(); }
+      } else if (e.key === 'Backspace' && !input.value && active && isLogTab(active)) {
+        const chips = filterChips(active.filter);
+        if (chips.length) { e.preventDefault(); setFilter(chips[chips.length - 1].clear); if (currentView === 'insights') renderInsights(); }
+      }
+    });
+    bar.addEventListener('mousedown', (e) => { if (!e.target.closest('button') && e.target !== input) { e.preventDefault(); input.focus(); } });
+    bar.querySelector('.qb-clear').onclick = () => { clearFilter(); input.focus(); };
+  }
+  function focusQueryBar() { const i = $('#qb-input'); i.focus(); i.select(); }
 
   // ---------- decorations ----------
   function refreshDecorations(tab) {
@@ -1483,6 +1655,18 @@
   }
 
   // ---------- signal strip ----------
+  // "4 errors" / "3 warnings": one click shows only that level, a second click shows everything again.
+  function levelPill(level, n, word, cls) {
+    const f = active.filter;
+    const on = f.levels.size === 1 && f.levels.has(level);
+    const stop = (e) => e.stopPropagation();
+    return h('button', {
+      class: 'sig-pill ' + cls + (on ? ' on' : ''), 'aria-pressed': on ? 'true' : 'false',
+      title: on ? 'Show all levels again' : 'Show only ' + word + 's',
+      onpointerdown: stop, ondblclick: stop,
+      onclick: (e) => { stop(e); setFilter({ levels: on ? new Set(Logs.LEVEL_CHIPS) : new Set([level]) }); if (currentView === 'insights') renderInsights(); },
+    }, n + ' ' + word + (n === 1 ? '' : 's'));
+  }
   function renderSignal() {
     const box = $('#signal');
     const an = active && isLogTab(active) ? active.an : null;
@@ -1494,8 +1678,8 @@
     meta.append(
       h('span', null, an.formatLabel || 'Log'),
       h('span', null, an.entries.length.toLocaleString() + ' entries'),
-      h('span', { class: 'e' }, an.counts.ERROR + ' errors'),
-      h('span', { class: 'w' }, an.counts.WARN + ' warnings'),
+      levelPill('ERROR', an.counts.ERROR, 'error', 'e'),
+      levelPill('WARN', an.counts.WARN, 'warning', 'w'),
       h('span', { class: 'grow' }),
       tl ? h('span', null, Logs.formatTs(tl.min, true) + '  to  ' + Logs.formatTs(tl.max) + '   (' + Logs.formatDuration(tl.max - tl.min) + ', bars of ' + Logs.formatDuration(tl.size) + ')') : h('span', null, 'No timestamps found'));
     const svg = $('#signal-svg');
@@ -3483,16 +3667,69 @@
   }
 
   function exitPanelFullscreen() { if (isFullscreen($('#panel'))) exitFullscreen(); }
+  // Results tabs (0.14.0): one tab per kind of result (extract / auto tables, table view, find in tabs).
+  // A tab keeps its own toolbar and content, so switching back shows it exactly as it was.
+  let panelTabs = [];
+  let panelCur = null;
+  const PANEL_KIND = { extract: 'Results', table: 'Table view', search: 'Find in tabs' };
+  function stashPanel() {
+    if (!panelCur) return;
+    panelCur.tools = Array.from($('#panel-tools').childNodes);
+    panelCur.body = Array.from($('#panel-body').childNodes);
+    panelCur.bodyClass = $('#panel-body').className;
+    panelCur.scroll = $('#panel-body').scrollTop;
+    $('#panel-tools').replaceChildren();
+    $('#panel-body').replaceChildren();
+  }
+  function showPanelTab(t) {
+    if (!t || t === panelCur) return;
+    stashPanel();
+    panelCur = t;
+    panelMode = t.mode;
+    $('#panel-tools').replaceChildren(...(t.tools || []));
+    $('#panel-body').replaceChildren(...(t.body || []));
+    $('#panel-body').className = t.bodyClass || '';
+    $('#panel-body').scrollTop = t.scroll || 0;
+    $('#panel-title').textContent = t.title;
+    renderPanelTabs();
+  }
+  function closePanelTab(t) {
+    const i = panelTabs.indexOf(t);
+    if (i < 0) return;
+    panelTabs.splice(i, 1);
+    if (t !== panelCur) { renderPanelTabs(); return; }
+    panelCur = null;
+    $('#panel-tools').replaceChildren();
+    $('#panel-body').replaceChildren();
+    if (!panelTabs.length) { closePanel(); return; }
+    showPanelTab(panelTabs[Math.min(i, panelTabs.length - 1)]);
+  }
+  function renderPanelTabs() {
+    const box = $('#panel-tabs');
+    const many = panelTabs.length > 1;
+    box.hidden = !many;
+    $('#panel-title').hidden = many;
+    box.replaceChildren(...panelTabs.map((t) => h('div', { class: 'ptab' + (t === panelCur ? ' on' : ''), role: 'tab', 'aria-selected': t === panelCur ? 'true' : 'false', title: t.title },
+      h('button', { class: 'ptab-name', onclick: () => showPanelTab(t) }, h('span', { class: 'ptab-kind' }, PANEL_KIND[t.mode] || t.mode), h('span', { class: 'ptab-title' }, t.title)),
+      h('button', { class: 'ptab-x', title: 'Close this result', 'aria-label': 'Close ' + (PANEL_KIND[t.mode] || t.mode), onclick: () => closePanelTab(t) }, '×'))));
+  }
   function openPanel(mode, title) {
-    panelMode = mode;
     const wasHidden = $('#panel').hidden;
+    if (wasHidden) { panelTabs = []; panelCur = null; }
+    stashPanel();
+    let t = panelTabs.find((x) => x.mode === mode);
+    if (!t) { t = { mode }; panelTabs.push(t); }
+    t.title = title;
+    panelCur = t;
+    panelMode = mode;
     $('#panel').hidden = false;
     if (wasHidden) setPanelHeight(settings.panelH || PANEL_DEFAULT(), false);
     $('#cp-fab').style.bottom = ($('#panel').offsetHeight + 18) + 'px';
     $('#panel-title').textContent = title;
     $('#panel-tools').innerHTML = '';
     $('#panel-body').innerHTML = '';
-    $('#panel-body').classList.remove('at-split');
+    $('#panel-body').className = '';
+    renderPanelTabs();
     editor.layout();
   }
   function closePanel() {
@@ -3500,6 +3737,8 @@
     $('#panel').hidden = true;
     $('#cp-fab').style.bottom = '';
     panelMode = null;
+    panelTabs = [];
+    panelCur = null;
     editor.layout();
     editor.focus();
   }
@@ -3702,7 +3941,7 @@
     return j === q.length ? { score: 100 - (idx[idx.length - 1] - idx[0]), idx } : null;
   }
 
-  function openPalette() {
+  function openPalette(initial) {
     const pal = $('#palette');
     const input = $('#palette-input');
     const list = $('#palette-list');
@@ -3730,7 +3969,7 @@
     };
     const close = () => { pal.hidden = true; input.oninput = input.onkeydown = null; pal.onmousedown = null; };
     const run = (i) => { const c = items[i]; close(); if (c) setTimeout(() => c.run(), 0); else editor.focus(); };
-    input.value = '';
+    input.value = typeof initial === 'string' ? initial : '';
     input.oninput = filter;
     input.onkeydown = (e) => {
       if (e.key === 'ArrowDown') { sel = Math.min(items.length - 1, sel + 1); draw(); e.preventDefault(); }
@@ -3839,6 +4078,7 @@
     }
     let handled = true;
     if (ctrl && e.shiftKey && k === 'p') openPalette();
+    else if (ctrl && !e.shiftKey && !e.altKey && k === 'k') focusQueryBar();
     else if (ctrl && !e.shiftKey && !e.altKey && k === 'n') actions.new();
     else if (ctrl && !e.shiftKey && k === 'o') actions.open();
     else if (ctrl && !e.shiftKey && k === 's') actions.save();
@@ -3944,6 +4184,7 @@
     $('#panel-close').onclick = closePanel;
     wireSideResize();
     wireSignal();
+    wireQueryBar();
     wireSnapDrag();
     wireLayoutButton();
     wirePanelResize();
@@ -4005,6 +4246,8 @@
       runCommand: (label) => { const c = commands().find((x) => x.label.toLowerCase().startsWith(label.toLowerCase())); if (!c) throw new Error('No command ' + label); return c.run(); },
     };
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
+    Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
+    Object.assign(window.__tf, { applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)) });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
