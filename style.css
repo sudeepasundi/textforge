@@ -794,3 +794,31 @@ body.compact #tabrow { height: 30px; }
 @media (max-width: 1100px) { .qb-key { display: none; } #palette-btn span, #palette-btn kbd { display: none; } #palette-btn { min-width: 0; } }
 body.compact #filterbar.querybar { margin: 3px auto; }
 body.compact #qb-input { height: 22px; }
+
+/* ---- design D part 2: patterns found, toolbar on selected text, Copilot badge (0.15.0) ---- */
+.pf-list { display: flex; flex-direction: column; gap: 6px; }
+.pf-item {
+  display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 8px 10px; text-align: left; border-radius: 8px;
+  border: 1px solid var(--line); background: transparent; color: var(--fg); font-size: 12px; cursor: pointer;
+}
+.pf-item:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: var(--accent-soft); }
+.pf-item.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pf-top { display: flex; gap: 8px; align-items: flex-start; min-width: 0; }
+.pf-top .at-dot { margin-top: 5px; }
+.pf-top .at-tpl { font: 12px/1.45 var(--mono); }
+.pf-count { flex: none; color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; padding-top: 1px; }
+.pf-cols { color: var(--muted); font-size: 11px; padding-left: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-more { margin-top: 6px; width: 100%; font-size: 12px; }
+
+.selbar { display: flex; gap: 2px; padding: 3px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); box-shadow: 0 6px 18px rgba(0,0,0,.28); font: 12px var(--ui); white-space: nowrap; z-index: 20; }
+.selbar:not(.on) { display: none; }
+.selbar .sb-btn { height: 26px; padding: 0 9px; border: none; border-radius: 5px; background: none; color: var(--fg); font-size: 12px; cursor: pointer; }
+.selbar .sb-btn:hover { background: var(--accent-soft); }
+.selbar .sb-btn[hidden] { display: none; }
+.selbar .sb-cp { background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+
+#cp-fab { overflow: visible; }
+#cp-fab .cp-badge {
+  position: absolute; top: -3px; right: -3px; min-width: 19px; height: 19px; padding: 0 5px; box-sizing: border-box; border-radius: 10px;
+  background: var(--err); color: #fff; font: 600 11px/19px var(--ui); text-align: center; box-shadow: 0 0 0 2px var(--editor);
+}

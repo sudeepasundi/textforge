@@ -1360,6 +1360,8 @@
     renderSignal();
     renderFilterBar();
     updateStatus();
+    updateCopilotBadge();
+    if (currentView === 'extract') renderPatternList($('.view[data-view="extract"] .pf-group'));
     const badge = $('.rail-btn[data-view="insights"] .badge');
     if (badge) badge.remove();
     if (an && an.counts.ERROR) {
@@ -2166,8 +2168,10 @@
       regexField.hidden = !!p.special;
       jsonField.hidden = p.special !== 'json';
       ciRow.hidden = !!p.special;
+      patternBox.hidden = p.special !== 'auto';
     };
     const ciRow = h('label', { class: 'check' }, ci, 'Ignore case');
+    const patternBox = h('div', { class: 'group pf-group' });
     const radio = (val, label) => h('label', { class: 'check' }, h('input', { type: 'radio', name: 'ex-scope', checked: extractState.scope === val, onchange: () => { extractState.scope = val; } }), label);
     const scopeGroup = h('div', { class: 'group' }, h('h3', null, 'Search in'),
       radio('line', 'Each line'),
@@ -2180,8 +2184,61 @@
       h('div', { class: 'group' },
         h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: extractState.onlyVisible, onchange: (e) => { extractState.onlyVisible = e.target.checked; } }), 'Only entries shown by the current filter')),
       h('div', { class: 'group' }, runBtn,
-        h('p', { class: 'hint' }, 'Results open in the panel below the editor. Number columns get min, max, average and p95. Click a line number to jump to it.')));
+        h('p', { class: 'hint' }, 'Results open in the panel below the editor. Number columns get min, max, average and p95. Click a line number to jump to it.')),
+      patternBox);
     sync();
+    renderPatternList(patternBox);
+  }
+
+  // ---------- patterns found (0.15.0) ----------
+  // The message patterns of the active tab, learned once per version of its text and listed in Extract data.
+  // A click opens that pattern's table in the results panel.
+  const PATTERN_AUTO_LINES = 20000; // bigger tabs wait for Build tables (learning takes about a second per 100k lines)
+  function patternsFor(tab) {
+    if (!tab) return null;
+    const v = tab.model.getVersionId();
+    if (tab.patterns && tab.patterns.version === v) return tab.patterns.res;
+    if (autoState && autoState.tab === tab && autoState.version === v && !autoState.filtered) { tab.patterns = { version: v, res: autoState.res }; return autoState.res; }
+    const lines = tab.model.getLinesContent();
+    if (lines.length > PATTERN_AUTO_LINES || !lines.some((l) => l.trim())) return null;
+    const an = isLogTab(tab) ? analyze(tab) : null;
+    const res = Logs.autoTables(lines, an ? an.entries : Logs.parseEntries(lines).entries);
+    tab.patterns = { version: v, res };
+    return res;
+  }
+  function openPattern(tb, res) {
+    if (!autoState || autoState.tab !== active || autoState.res !== res) {
+      autoState = { res, tab: active, selected: null, side: null, shown: true, filtered: false, version: active.model.getVersionId() };
+    }
+    showAutoTable(tb);
+    const box = $('.view[data-view="extract"] .pf-group');
+    if (box) renderPatternList(box);
+  }
+  const PATTERN_LIST_MAX = 12;
+  function renderPatternList(box) {
+    if (!box) return;
+    box.replaceChildren();
+    if (!active) return;
+    const res = patternsFor(active);
+    const head = (n) => h('h3', null, 'Patterns found' + (n != null ? ' · ' + n : ''));
+    if (!res) {
+      const big = active.model.getLineCount() > PATTERN_AUTO_LINES;
+      box.append(head(), h('p', { class: 'hint' }, big ? 'Large file: press Build tables to find the patterns.' : 'Nothing to find in this tab yet.'));
+      return;
+    }
+    if (!res.tables.length) { box.append(head(0), h('p', { class: 'hint' }, 'No repeating patterns here. Build tables shows every entry as a row.')); return; }
+    box.append(head(res.tables.length));
+    const list = h('div', { class: 'pf-list', role: 'list' });
+    for (const tb of res.tables.slice(0, PATTERN_LIST_MAX)) {
+      const on = autoState && autoState.res === res && autoState.selected === tb && !$('#panel').hidden;
+      list.append(h('button', { class: 'pf-item' + (on ? ' on' : ''), role: 'listitem', title: tb.template + (tb.logger ? '\n' + tb.logger : '') + '\nColumns: ' + tb.columns.join(', '), onclick: () => openPattern(tb, res) },
+        h('span', { class: 'pf-top' }, levelDot(tb.levels), tplNode(tb.title), h('span', { class: 'pf-count' }, tb.count.toLocaleString() + (tb.count === 1 ? ' row' : ' rows'))),
+        h('span', { class: 'pf-cols' }, tb.columns.join(' · '))));
+    }
+    box.append(list);
+    if (res.tables.length > PATTERN_LIST_MAX) {
+      box.append(h('button', { class: 'pf-more', onclick: () => openPattern(res.tables[0], res) }, 'See all ' + res.tables.length + ' patterns in the results'));
+    }
   }
 
   function extractUnits() {
@@ -2244,7 +2301,7 @@
     const t0 = performance.now();
     const res = Logs.autoTables(lines, entries);
     if (big) $('#toast').hidden = true;
-    autoState = { res, tab: t, selected: null, side: null, shown: true, filtered, ms: performance.now() - t0 };
+    autoState = { res, tab: t, selected: null, side: null, shown: true, filtered, ms: performance.now() - t0, version: t.model.getVersionId() };
     if (!res.tables.length) {
       showAutoTable(res.overview);
       toast('No repeating patterns found, so here is every entry as a row.', 5000);
@@ -2254,25 +2311,27 @@
     return res;
   }
 
+  // A pattern's most serious level as a coloured dot, and its template with the changing parts marked.
+  function levelDot(levels) {
+    const order = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
+    const top = order.find((l) => levels && levels[l]);
+    return top ? h('span', { class: 'at-dot lv-' + top.toLowerCase(), title: Object.entries(levels).map(([k, v]) => k + ' ' + v).join(', ') }) : h('span', { class: 'at-dot' });
+  }
+  function tplNode(text) {
+    const out = h('span', { class: 'at-tpl' });
+    text.split(/(‹[^›]*›)/).forEach((part) => {
+      if (!part) return;
+      out.append(part[0] === '‹' ? h('span', { class: 'at-var' }, part.slice(1, -1)) : document.createTextNode(part));
+    });
+    return out;
+  }
+
   function autoSide() {
     const st = autoState;
     const list = h('div', { class: 'at-list' });
     const items = h('div', { class: 'at-items', role: 'listbox', 'aria-label': 'Detected patterns' });
     const q = h('input', { type: 'search', placeholder: 'Filter ' + st.res.tables.length + ' patterns', 'aria-label': 'Filter patterns', spellcheck: false,
       oninput: () => draw() });
-    const levelDot = (levels) => {
-      const order = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE'];
-      const top = order.find((l) => levels && levels[l]);
-      return top ? h('span', { class: 'at-dot lv-' + top.toLowerCase(), title: Object.entries(levels).map(([k, v]) => k + ' ' + v).join(', ') }) : h('span', { class: 'at-dot' });
-    };
-    const tplNode = (text) => {
-      const out = h('span', { class: 'at-tpl' });
-      text.split(/(‹[^›]*›)/).forEach((part) => {
-        if (!part) return;
-        out.append(part[0] === '‹' ? h('span', { class: 'at-var' }, part.slice(1, -1)) : document.createTextNode(part));
-      });
-      return out;
-    };
     const item = (tb) => {
       const el = h('button', { class: 'at-item' + (st.selected === tb ? ' on' : ''), role: 'option', 'aria-selected': String(st.selected === tb), title: tb.template + (tb.logger ? '\n' + tb.logger : ''),
         onclick: () => showAutoTable(tb) },
@@ -2594,6 +2653,80 @@
     fit();
     if (navigator.windowControlsOverlay) navigator.windowControlsOverlay.addEventListener('geometrychange', fit);
     window.addEventListener('resize', debounce(fit, 100));
+  }
+
+  // ---------- Copilot button badge (0.15.0): the number of errors in this log it can explain ----------
+  function updateCopilotBadge() {
+    const fab = $('#cp-fab');
+    if (!fab) return;
+    let b = fab.querySelector('.cp-badge');
+    const an = active && isLogTab(active) ? active.an : null;
+    const n = an ? an.counts.ERROR : 0;
+    if (!n) {
+      if (b) b.remove();
+      fab.title = 'Copilot (Alt+4)';
+      fab.setAttribute('aria-label', 'Copilot');
+      return;
+    }
+    if (!b) { b = h('span', { class: 'cp-badge', 'aria-hidden': 'true' }); fab.append(b); }
+    b.textContent = n > 99 ? '99+' : String(n);
+    fab.title = 'Copilot (Alt+4). ' + n + ' error' + (n === 1 ? '' : 's') + ' in this log: right-click one and pick Ask Copilot, or select lines and use Ask Copilot.';
+    fab.setAttribute('aria-label', 'Copilot, ' + n + ' error' + (n === 1 ? '' : 's') + ' in this log');
+  }
+
+  // ---------- toolbar on selected text (0.15.0) ----------
+  // Appears just above a selection once the mouse is released: Table from selection, Copy masked,
+  // Show only entries with this (single-line selections in logs), Ask Copilot.
+  let selBar = null;
+  function wireSelectionBar() {
+    const Pref = monaco.editor.ContentWidgetPositionPreference;
+    let pos = null;
+    let mouseDown = false;
+    const run = (fn) => (e) => { e.preventDefault(); hide(); fn(); };
+    const btn = (label, title, fn, cls) => h('button', { class: 'sb-btn' + (cls ? ' ' + cls : ''), title, onmousedown: (e) => e.preventDefault(), onclick: run(fn) }, label);
+    const onlyBtn = btn('Show only entries with this', 'Filter the log to entries that contain the selected text', () => {
+      const text = selectedText().trim();
+      if (!text) return;
+      const cur = filterLines(active.filter.trace);
+      if (!cur.includes(text)) cur.push(text);
+      setFilter({ trace: cur.join('\n') });
+      if (currentView === 'insights') renderInsights();
+    });
+    const node = h('div', { class: 'selbar', role: 'toolbar', 'aria-label': 'Actions for the selected text' },
+      btn('Table from selection', 'Open the selected lines as an editable table (Ctrl+Shift+T)', openTableView),
+      btn('Copy masked', 'Copy with secrets masked', () => editor.getAction('tf.copyMasked').run()),
+      onlyBtn,
+      btn('Ask Copilot', 'Ask Copilot about the selected lines (secrets are masked first)', () => askCopilot('explain'), 'sb-cp'));
+    const widget = {
+      getId: () => 'tf.selbar',
+      getDomNode: () => node,
+      getPosition: () => (pos ? { position: pos, preference: [Pref.ABOVE, Pref.BELOW] } : null),
+      allowEditorOverflow: true,
+    };
+    const selectedText = () => { const s = editor.getSelection(); return s && !s.isEmpty() ? active.model.getValueInRange(s) : ''; };
+    function hide() { if (!pos) return; pos = null; node.classList.remove('on'); editor.layoutContentWidget(widget); }
+    function show() {
+      if (settings.selBar === false || mouseDown || !active) { hide(); return; }
+      const s = editor.getSelection();
+      if (!s || s.isEmpty() || active.model.getValueLengthInRange(s) < 2) { hide(); return; }
+      const oneLine = s.startLineNumber === s.endLineNumber && active.model.getValueLengthInRange(s) <= 200;
+      onlyBtn.hidden = !(oneLine && isLogTab(active));
+      pos = { lineNumber: s.startLineNumber, column: s.startLineNumber === s.endLineNumber ? s.startColumn : 1 };
+      node.classList.add('on');
+      editor.layoutContentWidget(widget);
+    }
+    const later = debounce(show, 250);
+    editor.addContentWidget(widget);
+    // Monaco reports presses on its content widgets too; a press on the toolbar itself must not hide it,
+    // or the button disappears before its click arrives.
+    const onBar = (e) => e.target && e.target.type === monaco.editor.MouseTargetType.CONTENT_WIDGET && e.target.detail === 'tf.selbar';
+    editor.onMouseDown((e) => { if (onBar(e)) return; mouseDown = true; hide(); });
+    editor.onMouseUp((e) => { if (onBar(e)) return; mouseDown = false; later(); });
+    editor.onDidChangeCursorSelection((e) => { if (editor.getSelection().isEmpty()) hide(); else if (!mouseDown && e.source === 'keyboard') later(); });
+    editor.onDidChangeModel(hide);
+    editor.onDidChangeModelContent(hide);
+    node.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hide(); editor.focus(); } });
+    selBar = { show, hide, node };
   }
 
   // ---------- floating / docked Copilot pane ----------
@@ -3906,6 +4039,12 @@
       ['Open Copilot panel', 'Copilot', 'Ctrl+4', () => openCopilot({ toggle: false })],
       ['Copilot: dock to the side / float', 'Copilot', '', () => { settings.cpDock = !settings.cpDock; saveSettings(); if (!copilotOpen()) openCopilot({ toggle: false }); else applyCopilotLayout(); }],
       ['Find in all open tabs', 'Search', 'Ctrl+Shift+F', openSearch],
+      ['Filter the log (query bar)', 'Search', 'Ctrl+K', focusQueryBar],
+      [(settings.selBar === false ? 'Show' : 'Hide') + ' the toolbar on selected text', 'View', '', () => {
+        settings.selBar = settings.selBar === false; saveSettings();
+        if (selBar) { if (settings.selBar) selBar.show(); else selBar.hide(); }
+        toast(settings.selBar ? 'Selecting text now shows a small toolbar above it.' : 'The toolbar on selected text is off. Turn it back on from the command palette.', 4000);
+      }],
       ['Table view of selection', 'Tables', 'Ctrl+Shift+T', openTableView],
       ['Convert selection to table', 'Tables', '', convertToTable],
       ['Toggle preview (rendered Markdown and tables)', 'View', 'Alt+P', () => setPreview(!(active && active.preview))],
@@ -4223,6 +4362,7 @@
     editor.addAction({ id: 'tf.table', label: 'Open selection in table view', contextMenuGroupId: '0_tf', contextMenuOrder: 5, run: openTableView });
     editor.addAction({ id: 'tf.toTable', label: 'Convert selection to table', contextMenuGroupId: '0_tf', contextMenuOrder: 6, run: convertToTable });
     editor.addAction({ id: 'tf.selectAll', label: 'Select all', contextMenuGroupId: '9_cutcopypaste', contextMenuOrder: 9, run: selectAll });
+    wireSelectionBar();
 
     window.addEventListener('keydown', onKeyDown, true);
     document.addEventListener('dragover', (e) => e.preventDefault());
@@ -4247,7 +4387,7 @@
     };
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
-    Object.assign(window.__tf, { applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)) });
+    Object.assign(window.__tf, { applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
