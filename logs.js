@@ -1143,7 +1143,100 @@
     return out;
   }
 
+  // ---------------- requests across logs (0.17.0) ----------------
+  // Entries that share a trace ID are one request. Each service it touched is a step: from the first entry
+  // (moved earlier when the line says how long it took: "took 1534ms" at 10:16:15.020 started at 10:16:13.486)
+  // to the last. A request failed when an entry is an ERROR or the caller got a 5xx.
+  const ROUTE_RE = /\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/[^\s?]*)/;
+  const STATUS_RE = /\b([1-5]\d\d)\s+in\s+\d/; // "POST /api/orders 502 in 1560ms"
+  const msText = (ms) => (ms < 1000 ? Math.round(ms) + ' ms' : formatDuration(Math.round(ms)));
+  function requests(res, opts = {}) {
+    const map = new Map();
+    res.services.forEach((s, si) => s.entries.forEach((e, ei) => {
+      if (!e.traceId || e.ts == null) return;
+      let r = map.get(e.traceId);
+      if (!r) { r = { id: e.traceId, hits: [] }; map.set(e.traceId, r); }
+      r.hits.push({ s: si, e: ei, ts: e.ts });
+    }));
+    const out = [];
+    for (const r of map.values()) {
+      r.hits.sort((a, b) => a.ts - b.ts || a.s - b.s);
+      const bySvc = new Map();
+      const steps = [];
+      let route = null;
+      let status = null;
+      let errors = 0;
+      let warns = 0;
+      let firstError = null;
+      let reported = 0;
+      for (const hit of r.hits) {
+        const svc = res.services[hit.s];
+        const e = svc.entries[hit.e];
+        const line = svc.lines[e.start] || '';
+        const d = durationMs(line);
+        if (d != null && d > reported) reported = d;
+        const rm = ROUTE_RE.exec(line);
+        if (!route && rm) route = rm[1] + ' ' + rm[2];
+        const sm = STATUS_RE.exec(line);
+        if (sm) status = +sm[1]; // the last response wins
+        let st = bySvc.get(hit.s);
+        if (!st) {
+          st = { s: hit.s, service: svc.name, from: hit.ts, to: hit.ts, refs: [], level: 'ok', label: null, firstTs: hit.ts };
+          bySvc.set(hit.s, st);
+          steps.push(st);
+        }
+        st.refs.push({ s: hit.s, e: hit.e });
+        if (d != null && hit.ts - d < st.from) st.from = hit.ts - d;
+        if (hit.ts > st.to) st.to = hit.ts;
+        if (!st.label) st.label = rm ? rm[1] + ' ' + rm[2] : cutText(cleanMessage(e.message || line), 60);
+        if (e.level === 'ERROR') {
+          st.level = 'error';
+          errors++;
+          if (!firstError) firstError = { s: hit.s, e: hit.e, ts: hit.ts, service: svc.name, message: cleanMessage(e.message || line) };
+        } else if (e.level === 'WARN') {
+          warns++;
+          if (st.level === 'ok') st.level = 'warn';
+        }
+      }
+      steps.sort((a, b) => a.from - b.from || a.firstTs - b.firstTs);
+      const from = Math.min(...steps.map((x) => x.from));
+      const to = Math.max(...steps.map((x) => x.to));
+      const ms = Math.max(to - from, reported);
+      const failed = errors > 0 || (status != null && status >= 500);
+      const slow = !failed && ms >= (opts.slowMs || 1000);
+      const rq = { id: r.id, route, status, steps, from, to, ms, errors, warns, failed, slow, firstError, services: steps.map((x) => x.service), hits: r.hits.length };
+      rq.summary = describeRequest(rq);
+      out.push(rq);
+    }
+    // failed first, then slow, then the rest; each group in time order
+    out.sort((a, b) => (b.failed - a.failed) || (b.slow - a.slow) || a.from - b.from);
+    return out;
+  }
+  // One or two plain sentences: where the request went, where it broke first, what the caller got.
+  function describeRequest(rq) {
+    const what = rq.route || 'This request';
+    const parts = [];
+    if (rq.hits === 1) parts.push(what + ' appears once, in ' + rq.services[0] + '.');
+    else parts.push(what + ' went through ' + joinNames(rq.services) + ' in ' + msText(rq.ms) + '.');
+    if (rq.failed && rq.firstError) {
+      const fe = rq.firstError;
+      parts.push('It first failed in ' + fe.service + ' at ' + formatTs(fe.ts) + ': ' + cutText(fe.message, 140).replace(/\.$/, '') + '.');
+      const others = rq.steps.filter((x) => x.level === 'error' && x.service !== fe.service).map((x) => x.service);
+      if (others.length) parts.push('Then ' + joinNames(others) + ' failed too.');
+      if (rq.status) parts.push('The caller got ' + rq.status + '.');
+    } else if (rq.failed) {
+      parts.push('The caller got ' + rq.status + '.');
+    } else if (rq.slow) {
+      const slowest = rq.steps.reduce((a, b) => (b.to - b.from > a.to - a.from ? b : a));
+      parts.push('It worked but was slow: ' + slowest.service + ' took ' + msText(slowest.to - slowest.from) + '.');
+    } else {
+      parts.push('It worked' + (rq.status ? ' (' + rq.status + ')' : '') + '.');
+    }
+    return parts.join(' ');
+  }
+
   return {
+    requests, describeRequest,
     incident, incidentBuckets, serviceName, durationMs,
     LEVEL_CHIPS, FORMAT_LABELS, PRESETS, autoTables, EXC_RE, FRAME_RE, STACK_LINE_RE,
     normLevel, findTimestamp, parseTimeInput, findTraceId, parseLine, parseEntries, isLogText, entryIndexAt,

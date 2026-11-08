@@ -283,3 +283,14 @@ INVESTIGATE LOGS TOGETHER: THE INCIDENT VIEW (0.16.0)
   entries. Click any entry to open that log at that line; "Back to the incident" returns.
   Copy findings gives a short text report with secrets masked.
   To try it: command palette (Ctrl+Shift+P) > "Try the incident sample".
+
+FOLLOW ONE REQUEST (0.17.0)
+  In the incident view (Alt+I), switch from Timeline to Requests at the top. Entries that
+  share a trace ID are one request; failed ones are listed first (Failed / Slow / All,
+  and a search box for trace ID, route or service).
+  For the chosen request you get a short summary in plain words (where it went, where it
+  first broke, what the caller got), a waterfall with one bar per service (how long each
+  took, where it failed) and the log lines behind the selected bar. Click a line to open
+  it in its log. "Show on the timeline" returns with that request's entries.
+  From the Timeline, "Follow request" (above the entries) and "Request ›" on each entry
+  jump straight to it.

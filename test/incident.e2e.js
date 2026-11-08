@@ -1,5 +1,5 @@
-/* 0.16.0: the incident view - several logs on one clock, findings, time window, reader, jump to a line and back.
-   Usage: node test/incident.e2e.js [selfhost URL] */
+/* 0.16.0-0.17.0: the incident view - several logs on one clock, findings, time window, reader, jump to a line and back,
+   and following one request across the logs (waterfall). Usage: node test/incident.e2e.js [selfhost URL] */
 const path = require('path');
 let playwright;
 try { playwright = require('playwright'); } catch { playwright = require(path.join(process.env.HOME || '', '.npm-global/lib/node_modules/playwright')); }
@@ -107,6 +107,53 @@ const ok = (name, pass, detail) => results.push({ name, pass: !!pass, detail });
   await page.waitForTimeout(200);
   r = await page.evaluate(() => window.__copied || '');
   ok('Copy findings gives a short report with secrets masked', /^Incident: api-gateway, order-service, payment-service, inventory-service/.test(r) && /\[quiet\] payment-service went quiet/.test(r) && !/hunter2|eyJhbGci/.test(r), r.slice(0, 160));
+
+  // ---- 0.17.0: follow one request ----
+  await page.click('#incident .inc-f >> nth=0');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => ({ head: (document.querySelector('#incident .inc-follow-btn') || {}).textContent, rows: document.querySelectorAll('#incident .inc-row-follow').length }));
+  ok('Entries that belong to one request offer to follow it (header and each row)', r.head === 'Follow request c3e09f1a ›' && r.rows === 2, JSON.stringify(r));
+  await page.click('#incident .inc-follow-btn');
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => ({
+    mode: __tf.incident.mode, tab: document.querySelector('#incident .inc-modes .on').textContent,
+    on: (document.querySelector('#incident .inc-req.on .inc-req-id') || {}).textContent,
+    text: (document.querySelector('#incident .inc-rq-text') || {}).textContent,
+    steps: [...document.querySelectorAll('#incident .inc-wf-row')].map((x) => x.querySelector('.inc-row-svc').textContent),
+    bars: [...document.querySelectorAll('#incident .inc-wf-bar')].map((b) => { const r = b.getBoundingClientRect(); return [Math.round(r.left), Math.round(r.right)]; }),
+    sel: [...document.querySelectorAll('#incident .inc-wf-row')].findIndex((x) => x.classList.contains('on')),
+    lines: document.querySelectorAll('#incident .inc-code-line').length,
+  }));
+  ok('Requests view opens on that request, with a plain summary', r.mode === 'requests' && /^Requests/.test(r.tab) && r.on === 'c3e09f1a' && /^POST \/api\/orders went through api-gateway, order-service and payment-service in 1\.6 s\. It first failed in payment-service/.test(r.text), JSON.stringify(r).slice(0, 260));
+  ok('Steps are one per service, nested like a waterfall', r.steps.join() === 'api-gateway,order-service,payment-service' && r.bars[0][0] <= r.bars[1][0] && r.bars[1][0] <= r.bars[2][0] && r.bars[2][1] <= r.bars[1][1] + 1 && r.bars[1][1] <= r.bars[0][1] + 1, JSON.stringify(r.bars));
+  ok('The first failing step is selected and its log lines (with the stack) are shown', r.sel === 1 && r.lines >= 10, JSON.stringify({ sel: r.sel, lines: r.lines }));
+  r = await page.evaluate(() => [...document.querySelectorAll('#incident .inc-wf-row')].map((row) => {
+    const t = row.querySelector('.inc-wf-track').getBoundingClientRect(), d = row.querySelector('.inc-wf-dur').getBoundingClientRect();
+    return d.left >= t.left - 1 && d.right <= t.right + 1;
+  }));
+  ok('Duration labels stay inside the timeline area (never over the step names)', r.every(Boolean), JSON.stringify(r));
+  await page.click('#incident .inc-wf-row >> nth=2');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => ({ head: document.querySelector('#incident .inc-rq-lhead').textContent, first: (document.querySelector('#incident .inc-code-line .inc-code-t') || {}).textContent }));
+  ok('Clicking a step shows the lines behind it', /payment-service\.log/.test(r.head) && /POST \/api\/payments orderId=90002/.test(r.first), JSON.stringify(r).slice(0, 200));
+  await page.click('#incident .inc-chip >> text=Slow');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => ({ list: [...document.querySelectorAll('#incident .inc-req .inc-req-id')].map((x) => x.textContent), text: document.querySelector('#incident .inc-rq-text').textContent }));
+  ok('The Slow filter finds the slow request and explains it', r.list.join() === '5c4b3a29' && /worked but was slow/.test(r.text), JSON.stringify(r));
+  await page.click('#incident .inc-chip >> text=All');
+  await page.fill('#incident .inc-rq-search', 'payments');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => [...document.querySelectorAll('#incident .inc-req .inc-req-id')].map((x) => x.textContent));
+  ok('Search finds requests by route', r.includes('3e4f5061') && r.length <= 3, JSON.stringify(r));
+  await page.fill('#incident .inc-rq-search', '');
+  await page.evaluate(() => __tf.followRequest('7a6b5c4d3e2f1a0b'));
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => document.querySelector('#incident .inc-rq-text').textContent);
+  ok('Summaries mask secrets (the Bearer token in the error message)', /Bearer <jwt>|Bearer \*\*\*\*/.test(r) && !/eyJhbGci/.test(r), r.slice(0, 200));
+  await page.click('#incident button:has-text("Show on the timeline")');
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => ({ mode: __tf.incident.mode, title: document.querySelector('#incident .inc-r-title').textContent, rows: document.querySelectorAll('#incident .inc-row').length, win: !!__tf.incident.win }));
+  ok('"Show on the timeline" goes back with that request\'s entries and time window', r.mode === 'timeline' && r.title === 'Request 7a6b5c4d' && r.rows === 4 && r.win, JSON.stringify(r));
 
   // appearance
   r = await page.evaluate(() => {

@@ -78,6 +78,41 @@ test('Lanes: each service spread over equal slices of the time span', () => {
   assert.strictEqual(b.reduce((a, x) => a + x.error, 0), 3);
 });
 
+// ---- 0.17.0: requests across logs ----
+test('Entries that share a trace ID become one request; failed ones come first', () => {
+  const rq = L.requests(inc());
+  assert.strictEqual(rq.length, 19);
+  assert.ok(rq.slice(0, 8).every((r) => r.failed), 'failed first');
+  assert.strictEqual(rq[0].id, 'c3e09f1a7b264d58');
+});
+
+test('Each service is a step; reported durations move the start earlier, so steps nest', () => {
+  const r = L.requests(inc()).find((x) => x.id === 'c3e09f1a7b264d58');
+  assert.deepStrictEqual(r.services, ['api-gateway', 'order-service', 'payment-service']);
+  const [gw, order, pay] = r.steps;
+  assert.ok(gw.from <= order.from && order.from <= pay.from && pay.to <= order.to && order.to <= gw.to, 'nested');
+  assert.strictEqual(Math.round(order.to - order.from), 1535); // took 1534ms, logged at .020, error at .021
+  assert.strictEqual(r.status, 502);
+  assert.strictEqual(r.route, 'POST /api/orders');
+  assert.deepStrictEqual(r.steps.map((s) => s.level), ['warn', 'error', 'error']);
+});
+
+test('The summary says where it went, where it broke first and what the caller got', () => {
+  const r = L.requests(inc()).find((x) => x.id === 'c3e09f1a7b264d58');
+  assert.strictEqual(r.summary, 'POST /api/orders went through api-gateway, order-service and payment-service in 1.6 s. It first failed in payment-service at 10:16:15: Read timed out after 1500 ms charging orderId=90002. Then order-service failed too. The caller got 502.');
+});
+
+test('Slow and fine requests are told apart; a single line is "appears once"', () => {
+  const rq = L.requests(inc());
+  const slow = rq.find((x) => x.id === '5c4b3a291807f6e5');
+  assert.ok(slow.slow && !slow.failed, 'slow');
+  assert.ok(/worked but was slow/.test(slow.summary), slow.summary);
+  const ok = rq.find((x) => x.id === 'e4d3c2b1a0f9e8d7');
+  assert.ok(!ok.failed && !ok.slow && /It worked \(201\)\./.test(ok.summary), ok.summary);
+  const once = rq.find((x) => x.id === '1b2c3d4e5f607182');
+  assert.ok(/appears once, in api-gateway/.test(once.summary), once.summary);
+});
+
 test('Big incidents stay quick (4 logs x 50k entries)', () => {
   const big = SAMPLES.map((n, k) => {
     const lines = [];
@@ -89,8 +124,10 @@ test('Big incidents stay quick (4 logs x 50k entries)', () => {
   });
   const t0 = Date.now();
   const r = L.incident(big);
+  const rq = L.requests(r);
   const ms = Date.now() - t0;
   assert.strictEqual(r.services.length, 4);
+  assert.ok(Array.isArray(rq));
   assert.ok(ms < 5000, ms + ' ms');
 });
 
