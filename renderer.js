@@ -43,6 +43,7 @@
   const IS_WEB = api.platform === 'web';
   const CAN = Object.assign({ embeddedCopilot: true, sessionStoresContent: false, canDownload: true }, api.capabilities || {});
   const WEB = window.TF_WEB || {};
+  const APP_VERSION = WEB.version || api.version || '';
 
   // ---------------- Monaco bootstrap ----------------
   const baseDir = location.href.substring(0, location.href.lastIndexOf('/'));
@@ -3763,7 +3764,7 @@
     $('#panel').style.height = hgt + 'px';
     $('#panel').classList.toggle('maxed', hgt >= max - 2);
     if (save) { settings.panelH = hgt; saveSettings(); }
-    $('#cp-fab').style.bottom = (hgt + 18) + 'px';
+    // (0.15.1) the Copilot button no longer rides on top of the panel: it stays in the bottom-right corner
     if (editor) editor.layout();
     return hgt;
   }
@@ -3857,7 +3858,6 @@
     panelMode = mode;
     $('#panel').hidden = false;
     if (wasHidden) setPanelHeight(settings.panelH || PANEL_DEFAULT(), false);
-    $('#cp-fab').style.bottom = ($('#panel').offsetHeight + 18) + 'px';
     $('#panel-title').textContent = title;
     $('#panel-tools').innerHTML = '';
     $('#panel-body').innerHTML = '';
@@ -4169,7 +4169,7 @@
 
   function showHelp() {
     const rows = IS_WEB ? [
-      ['Ctrl+Shift+P', 'Search all commands'], ['Alt+N', 'New tab'], ['Ctrl+O / Ctrl+S', 'Open, save'], ['Alt+W', 'Close tab'],
+      ['Ctrl+Shift+P', 'Search all commands'], ['Ctrl+K', 'Filter the log (query bar)'], ['Alt+N', 'New tab'], ['Ctrl+O / Ctrl+S', 'Open, save'], ['Alt+W', 'Close tab'],
       ['Alt+1 / 2 / 3 / 4', 'Log insights, extract, highlights, Copilot'], ['Ctrl+B', 'Show or hide the sidebar'],
       ['Alt+T', 'Table view of selection'], ['Alt+P', 'Preview: rendered Markdown and tables'],
     ] : [
@@ -4179,9 +4179,10 @@
       ['Ctrl+F / Ctrl+H', 'Find or replace (regex supported)'], ['Ctrl+Shift+F', 'Find in all open tabs'],
       ['Ctrl+Shift+T', 'Table view of selection'], ['Alt+P', 'Preview: rendered Markdown and tables'], ['Ctrl+Shift+V', 'Paste as plain text'],
       ['Alt+Shift+drag', 'Column selection'], ['Alt+click', 'Add a cursor'], ['Ctrl+D', 'Select next occurrence'],
-      ['Ctrl+K Ctrl+0 / J', 'Fold or unfold everything'], ['Alt+Z', 'Word wrap'], ['Ctrl+= / - / 0', 'Zoom'], ['F1', 'Editor commands (sort, case, …)'],
+      ['Ctrl+K', 'Filter the log (query bar); > runs a command'], ['Alt+Z', 'Word wrap'], ['Ctrl+= / - / 0', 'Zoom'], ['F1', 'Editor commands (sort, case, …)'],
     ];
-    modal('Keyboard shortcuts', '<table>' + rows.map((r) => `<tr><td><kbd>${esc(r[0])}</kbd></td><td>${esc(r[1])}</td></tr>`).join('') + '</table>', [{ label: 'Close', value: true, primary: true }]);
+    modal('Keyboard shortcuts', '<table>' + rows.map((r) => `<tr><td><kbd>${esc(r[0])}</kbd></td><td>${esc(r[1])}</td></tr>`).join('') + '</table>' +
+      (APP_VERSION ? '<p class="hint tf-version" style="margin:14px 0 0">TextForge ' + esc(APP_VERSION) + '</p>' : ''), [{ label: 'Close', value: true, primary: true }]);
   }
 
   const actions = {
@@ -4373,6 +4374,10 @@
       const paths = Array.from(e.dataTransfer.files).map((f) => api.pathForFile(f)).filter(Boolean);
       if (paths.length) openPaths(paths);
     });
+    // Web: a new version was downloaded in the background (see the service worker in build-web.js).
+    window.addEventListener('tf-update', () => toast('A new version of TextForge is ready. Reload to use it; your tabs are kept.', 30000,
+      { label: 'Reload', run: () => { try { api.saveSessionSync(sessionData()); } catch { /* the regular autosave still has it */ } location.reload(); } }));
+    if (APP_VERSION) { const brand = $('#topbar .brand'); if (brand) brand.title = 'TextForge ' + APP_VERSION; }
     api.onOpenPaths(openPaths);
     api.onTailData(onTailData);
     startDiskWatch();

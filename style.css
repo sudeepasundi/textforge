@@ -822,3 +822,8 @@ body.compact #qb-input { height: 22px; }
   position: absolute; top: -3px; right: -3px; min-width: 19px; height: 19px; padding: 0 5px; box-sizing: border-box; border-radius: 10px;
   background: var(--err); color: #fff; font: 600 11px/19px var(--ui); text-align: center; box-shadow: 0 0 0 2px var(--editor);
 }
+
+/* ---- 0.15.1: Copilot intro keeps a readable width (it stretched across the screen in full screen) ---- */
+.cp-intro { max-width: 760px; }
+#cp-host.fs-mode .cp-intro { margin: 0 auto; padding-top: 24px; }
+.cp-intro select { max-width: 420px; }
