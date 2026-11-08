@@ -36,6 +36,10 @@ function listFiles(dir, base = dir) {
 const indexHtml = read('index.html');
 const bodyMarkup = indexHtml.slice(indexHtml.indexOf('<body>') + 6, indexHtml.indexOf('<script')).trim();
 const sample = read('samples/order-service.log');
+// The incident sample (0.16.0): four services that fail together. Small, so they travel inside the page.
+const incidentSamples = {};
+for (const n of ['api-gateway.log', 'order-service.log', 'payment-service.log', 'inventory-service.log']) incidentSamples[n] = read('samples/' + n);
+const samplesJs = JSON.stringify(incidentSamples).replace(/<\//g, '<\\/');
 const css = read('style.css');
 const scripts = ['tables.js', 'markdown.js', 'logs.js', 'web-api.js', 'renderer.js'];
 const ICON_SVG = read('assets/icon.svg');
@@ -88,7 +92,7 @@ const shHtml = `<!DOCTYPE html>
 </head>
 <body>
 ${bodyMarkup}
-  <script>window.TF_WEB = { target: 'selfhost', version: '${APP_VERSION}', monacoBase: 'monaco', canDownload: true, sample: ${JSON.stringify(sample)} };</script>
+  <script>window.TF_WEB = { target: 'selfhost', version: '${APP_VERSION}', monacoBase: 'monaco', canDownload: true, sample: ${JSON.stringify(sample)}, samples: ${samplesJs} };</script>
   <script src="monaco/vs/loader.js"></script>
 ${scripts.map((s) => `  <script src="${s}"></script>`).join('\n')}
   <script>
@@ -195,7 +199,7 @@ fs.writeFileSync(path.join(DK, 'index.html'), `<!DOCTYPE html>
 </head>
 <body>
 ${bodyMarkup}
-  <script>window.TF_WEB = { target: 'tauri', version: '${APP_VERSION}', monacoBase: 'monaco' };</script>
+  <script>window.TF_WEB = { target: 'tauri', version: '${APP_VERSION}', monacoBase: 'monaco', samples: ${samplesJs} };</script>
   <script src="monaco/vs/loader.js"></script>
 ${desktopScripts.map((s) => `  <script src="${s}"></script>`).join('\n')}
 </body>
@@ -220,7 +224,7 @@ ${monacoCss}
 ${pageCss}
 </style>
 ${bodyMarkup}
-<script>window.TF_WEB = { target: 'artifact', version: '${APP_VERSION}', monacoBase: '${cdn}', inlineMonacoCss: true, canDownload: false, sample: ${JSON.stringify(sample).replace(/<\//g, '<\\/')} };</script>
+<script>window.TF_WEB = { target: 'artifact', version: '${APP_VERSION}', monacoBase: '${cdn}', inlineMonacoCss: true, canDownload: false, sample: ${JSON.stringify(sample).replace(/<\//g, '<\\/')}, samples: ${samplesJs} };</script>
 <script src="${cdn}/vs/loader.js"></script>
 ${scripts.map((s) => `<script>\n${inline(s)}\n</script>`).join('\n')}
 `;

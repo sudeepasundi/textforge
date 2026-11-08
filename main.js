@@ -192,7 +192,8 @@ ipcMain.handle('file:readFrom', (_e, p, offset) => {
     return { path: p, error: e.message };
   } finally { if (fd !== undefined) fs.closeSync(fd); }
 });
-ipcMain.handle('sample', () => readFileSafe(path.join(__dirname, 'samples', 'order-service.log')));
+// The sample logs: order-service by default; the incident sample asks for the others by name (0.16.0).
+ipcMain.handle('sample', (_e, name) => readFileSafe(path.join(__dirname, 'samples', /^[\w-]+\.log$/.test(name || '') ? name : 'order-service.log')));
 
 // Rename a saved file in its own folder (the tab follows).
 ipcMain.handle('file:rename', (_e, { path: p, name }) => {

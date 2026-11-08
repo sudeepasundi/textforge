@@ -1,0 +1,26 @@
+2026-11-02T10:15:02.210+05:30  INFO 18377 --- [payment-service] [           main] c.e.payment.PaymentApplication           : Starting PaymentApplication v3.2.0 using Java 21.0.4 with PID 18377
+2026-11-02T10:15:07.904+05:30  INFO 18377 --- [payment-service] [           main] c.e.payment.PaymentApplication           : Started PaymentApplication in 5.694 seconds
+2026-11-02T10:15:30.015+05:30  INFO 18377 --- [payment-service] [   scheduling-1] c.e.payment.health.BankHealthCheck       : bank-gateway reachable in 88ms
+2026-11-02T10:16:00.019+05:30  INFO 18377 --- [payment-service] [   scheduling-1] c.e.payment.health.BankHealthCheck       : bank-gateway reachable in 412ms
+2026-11-02T10:16:10.020+05:30  INFO 18377 --- [payment-service] [nio-8083-exec-1] c.e.payment.web.PaymentController        : traceId=6f1c2a9be0d34f11 POST /api/payments orderId=90001 amount=249.00 took 41ms
+2026-11-02T10:16:13.502+05:30  INFO 18377 --- [payment-service] [nio-8083-exec-2] c.e.payment.web.PaymentController        : traceId=c3e09f1a7b264d58 POST /api/payments orderId=90002 amount=1499.00
+2026-11-02T10:16:13.504+05:30  INFO 18377 --- [payment-service] [nio-8083-exec-2] c.e.payment.bank.BankClient              : traceId=c3e09f1a7b264d58 charge -> bank-gateway (timeout 1500 ms)
+2026-11-02T10:16:14.394+05:30  WARN 18377 --- [payment-service] [nio-8083-exec-2] c.e.payment.bank.BankClient              : traceId=c3e09f1a7b264d58 bank-gateway slow: no response after 890 ms
+2026-11-02T10:16:15.006+05:30 ERROR 18377 --- [payment-service] [nio-8083-exec-2] c.e.payment.bank.BankClient              : traceId=c3e09f1a7b264d58 Read timed out after 1500 ms charging orderId=90002
+java.net.SocketTimeoutException: Read timed out
+	at java.base/sun.nio.ch.NioSocketImpl.timedRead(NioSocketImpl.java:288)
+	at com.example.payment.bank.BankClient.charge(BankClient.java:88)
+	at com.example.payment.web.PaymentController.pay(PaymentController.java:51)
+2026-11-02T10:16:15.008+05:30  INFO 18377 --- [payment-service] [nio-8083-exec-2] c.e.payment.web.PaymentController        : traceId=c3e09f1a7b264d58 respond 504 to order-service in 1506ms
+2026-11-02T10:16:21.080+05:30  INFO 18377 --- [payment-service] [nio-8083-exec-3] c.e.payment.web.PaymentController        : traceId=d2f8b6a1c9e04e77 POST /api/payments orderId=90004 amount=89.00 took 63ms
+2026-11-02T10:16:30.018+05:30  WARN 18377 --- [payment-service] [   scheduling-1] c.e.payment.health.BankHealthCheck       : bank-gateway slow: 1320ms
+2026-11-02T10:16:38.640+05:30  WARN 18377 --- [payment-service] [nio-8083-exec-4] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Pool stats (total=10, active=10, idle=0, waiting=6)
+2026-11-02T10:16:41.977+05:30  INFO 18377 --- [payment-service] [nio-8083-exec-5] c.e.payment.web.PaymentController        : traceId=3e4f50617283a4b5 POST /api/payments orderId=90009 amount=35.00
+2026-11-02T10:17:29.551+05:30  WARN 18377 --- [payment-service] [ool housekeeper] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=47s561ms)
+2026-11-02T10:17:29.602+05:30 ERROR 18377 --- [payment-service] [nio-8083-exec-6] c.e.payment.bank.BankClient              : traceId=7a6b5c4d3e2f1a0b Read timed out after 1500 ms charging orderId=90007
+java.net.SocketTimeoutException: Read timed out
+	at com.example.payment.bank.BankClient.charge(BankClient.java:88)
+2026-11-02T10:17:29.650+05:30 ERROR 18377 --- [payment-service] [nio-8083-exec-5] c.e.payment.web.PaymentController        : traceId=3e4f50617283a4b5 Request failed after 47673ms: HikariPool-1 - Connection is not available, request timed out after 30000ms
+2026-11-02T10:17:30.017+05:30  INFO 18377 --- [payment-service] [   scheduling-1] c.e.payment.health.BankHealthCheck       : bank-gateway reachable in 95ms
+2026-11-02T10:18:00.016+05:30  INFO 18377 --- [payment-service] [   scheduling-1] c.e.payment.health.BankHealthCheck       : bank-gateway reachable in 81ms
+2026-11-02T10:18:12.020+05:30  INFO 18377 --- [payment-service] [nio-8083-exec-7] c.e.payment.web.PaymentController        : traceId=e4d3c2b1a0f9e8d7 POST /api/payments orderId=90008 amount=120.00 took 38ms

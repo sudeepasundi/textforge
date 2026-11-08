@@ -366,6 +366,11 @@
   }, 500);
 
   function activate(tab) {
+    // Picking a tab while the incident covers the editor shows that tab; the incident can be reopened.
+    if (typeof removeIncidentView === 'function' && $('#incident')) {
+      removeIncidentView();
+      toast('The incident is still there.', 7000, { label: 'Back to the incident', run: reopenIncident });
+    }
     tab.used = ++useClock;
     if (active && active !== tab) active.viewState = editor.saveViewState();
     active = tab;
@@ -1232,6 +1237,294 @@
     if (v) compareWith(others[+sel.value]);
   }
 
+  // ======================================================================
+  // INCIDENT (0.16.0): several logs on one clock. Each log is a lane, dots are entries (size = how many,
+  // colour = level). Drag across the lanes for a time window; the reader on the right lists those entries
+  // from every log in time order, and a click opens that line in its tab. Findings on the left are spotted
+  // by the engine (Logs.incident): errors in several services at once, repeated errors, a service going
+  // quiet, slow calls. It covers the editor area like the comparison does; the tabs stay as they are.
+  // ======================================================================
+  const INCIDENT_BUCKETS = 120;
+  const LANE_TINTS = ['#5fb3ff', '#4fc1b0', '#b39ddb', '#e3a35b', '#e88bc4', '#9ccc65', '#7fa7b5', '#f06292'];
+  const INCIDENT_SAMPLES = ['api-gateway.log', 'order-service.log', 'payment-service.log', 'inventory-service.log'];
+  let incident = null; // { tabs, res, buckets, win: [from, to] | null, finding, reader }
+  const maskText = (s) => Logs.maskSecrets(String(s || ''), settings.mask).text;
+
+  async function sampleText(name) {
+    if (name === 'order-service.log' && WEB.sample) return WEB.sample;
+    if (WEB.samples && WEB.samples[name]) return WEB.samples[name];
+    if (api.sample) { const r = await api.sample(name); return r && r.content; }
+    return null;
+  }
+  async function openIncidentSample() {
+    const list = [];
+    for (const name of INCIDENT_SAMPLES) {
+      let t = tabs.find((x) => x.name === name && !x.path);
+      if (!t) {
+        const text = await sampleText(name);
+        if (!text) { toast('The incident sample is not available in this version.'); return; }
+        t = newTab({ name, content: text, lang: 'log' });
+        t.detectDone = true;
+      }
+      list.push(t);
+    }
+    activate(list[1]);
+    openIncident(list);
+  }
+  async function pickIncident() {
+    const logs = tabs.filter((t) => isLogTab(t) && t.model.getValueLength() > 0);
+    if (logs.length < 2) {
+      toast('Open two or more logs (for example one per service) to look at them together.', 7000, { label: 'Try the incident sample', run: openIncidentSample });
+      return;
+    }
+    const boxes = logs.map((t) => h('input', { type: 'checkbox', checked: true }));
+    const body = h('div', null,
+      h('p', { class: 'hint', style: 'margin-top:0' }, 'Each log becomes a lane on one shared clock. TextForge looks for errors that hit several services at once, repeated errors, a service that goes quiet and slow calls.'),
+      ...logs.map((t, i) => h('label', { class: 'check' }, boxes[i], t.name)));
+    const v = await modal('Investigate logs together', body, [{ label: 'Cancel', value: null }, { label: 'Investigate', value: 'go', primary: true }]);
+    if (!v) return;
+    const chosen = logs.filter((t, i) => boxes[i].checked);
+    if (chosen.length < 1) return;
+    openIncident(chosen);
+  }
+
+  function openIncident(list) {
+    closeCompare();
+    removeIncidentView();
+    const sources = list.map((t) => { const an = analyze(t) || { entries: [], lines: t.model.getLinesContent() }; return { name: t.name, lines: an.lines, entries: an.entries }; });
+    const res = Logs.incident(sources);
+    if (res.min == null) { toast('These logs have no timestamps, so they cannot be lined up on one clock.', 6000); return; }
+    incident = { tabs: list.slice(), res, buckets: res.services.map((s) => Logs.incidentBuckets(s, res.min, res.max, INCIDENT_BUCKETS)), win: null, finding: null, reader: null };
+    renderIncident();
+  }
+  function removeIncidentView() {
+    if (isFullscreen($('#incident'))) exitFullscreen();
+    const el = $('#incident');
+    if (el) el.remove();
+    document.body.classList.remove('incident-open');
+    updateWelcome();
+  }
+  function closeIncident() { removeIncidentView(); incident = null; if (editor) setTimeout(() => editor.layout(), 0); }
+  function reopenIncident() {
+    if (!incident) return;
+    const alive = incident.tabs.filter((t) => tabs.includes(t));
+    if (alive.length < incident.tabs.length) { if (alive.length) openIncident(alive); else incident = null; return; }
+    renderIncident();
+  }
+
+  const pctOf = (ts) => ((ts - incident.res.min) / Math.max(1, incident.res.max - incident.res.min)) * 100;
+  const tsAt = (pct) => incident.res.min + (pct / 100) * Math.max(1, incident.res.max - incident.res.min);
+
+  function renderIncident() {
+    removeIncidentView();
+    const st = incident;
+    const res = st.res;
+    const fsBtn = h('button', { class: 'icon-btn small fs-btn', title: 'Full screen. Esc to exit', 'data-title': 'Full screen. Esc to exit', html: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>', onclick: () => toggleFullscreen($('#incident'), { label: 'The incident' }) });
+    const head = h('div', { class: 'pv-head inc-head' },
+      h('strong', null, 'Incident'), h('span', { class: 'inc-sub' }, res.services.length + ' logs · ' + Logs.formatTs(res.min) + ' to ' + Logs.formatTs(res.max) + ' · ' + Logs.formatDuration(res.max - res.min)),
+      h('span', { class: 'grow' }),
+      h('button', { onclick: copyIncidentFindings, title: 'Copy the findings as text, with secrets masked' }, 'Copy findings'),
+      fsBtn,
+      h('button', { class: 'icon-btn small', title: 'Close the incident (your tabs stay open)', 'aria-label': 'Close the incident', html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>', onclick: closeIncident }));
+    head.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleFullscreen($('#incident'), { label: 'The incident' }); });
+
+    // findings
+    const fList = h('div', { class: 'inc-flist', role: 'list' });
+    const KIND = { together: 'together', error: 'error', quiet: 'quiet', slow: 'slow' };
+    res.findings.forEach((f, i) => {
+      const when = f.from == null ? '' : Logs.formatTs(f.from) + (f.to && f.to - f.from >= 1000 ? ' to ' + Logs.formatTs(f.to) : '');
+      fList.append(h('button', { class: 'inc-f k-' + f.kind + (st.finding === i ? ' on' : ''), role: 'listitem', onclick: () => pickFinding(i) },
+        h('span', { class: 'inc-f-top' }, h('span', { class: 'inc-tag' }, KIND[f.kind] || f.kind), h('span', { class: 'inc-when' }, when)),
+        h('span', { class: 'inc-f-title' }, maskText(f.title)),
+        h('span', { class: 'inc-f-detail' }, maskText(f.detail))));
+    });
+    if (!res.findings.length) fList.append(h('p', { class: 'hint' }, 'Nothing stands out: no errors, quiet services or slow calls.'));
+    const findings = h('aside', { class: 'inc-findings', 'aria-label': 'Findings' },
+      h('div', { class: 'inc-col-head' }, h('strong', null, 'Findings'), h('span', null, String(res.findings.length))), fList);
+
+    // ruler + lanes
+    const ticks = h('div', { class: 'inc-ticks' });
+    const ruler = h('div', { class: 'inc-ruler' }, h('span', { class: 'inc-lbl-sp' }), h('div', { class: 'inc-ruler-track' }, ticks, h('div', { class: 'inc-win-label', hidden: true })));
+    const lanes = h('div', { class: 'inc-lanes' });
+    res.services.forEach((s, si) => {
+      const tab = st.tabs[si];
+      const tint = LANE_TINTS[si % LANE_TINTS.length];
+      const track = h('div', { class: 'inc-track', 'data-s': String(si) }, h('div', { class: 'inc-win', hidden: true }));
+      st.buckets[si].forEach((b, bi) => {
+        if (!b.total) return;
+        const size = 6 + Math.min(12, Math.round(Math.log2(b.total + 1) * 2.6));
+        const cls = b.error ? 'err' : b.warn ? 'warn' : 'other';
+        const from = res.min + (res.max - res.min) * bi / INCIDENT_BUCKETS;
+        track.append(h('span', { class: 'inc-dot ' + cls, style: `left:${(bi + 0.5) * 100 / INCIDENT_BUCKETS}%;width:${size}px;height:${size}px`,
+          title: Logs.formatTs(from) + ' · ' + b.total + ' entr' + (b.total === 1 ? 'y' : 'ies') + (b.error ? ', ' + b.error + ' error' + (b.error === 1 ? '' : 's') : '') + (b.warn ? ', ' + b.warn + ' warning' + (b.warn === 1 ? '' : 's') : '') }));
+      });
+      const errs = s.counts.ERROR || 0;
+      lanes.append(h('div', { class: 'inc-lane' },
+        h('button', { class: 'inc-lbl', title: 'Open ' + tab.name, onclick: () => openIncidentLine(tab, 1) },
+          h('span', { class: 'inc-svc' }, h('i', { style: 'background:' + tint }), s.name),
+          h('span', { class: 'inc-meta' }, s.entries.length.toLocaleString() + ' entries', h('b', { class: errs ? 'bad' : '' }, errs + ' error' + (errs === 1 ? '' : 's')))),
+        track));
+    });
+    const main = h('div', { class: 'inc-main' }, ruler, lanes,
+      h('p', { class: 'inc-hint' }, 'Drag across the lanes to look at a time window; double-click to clear it. Click a dot for its entries.'));
+
+    // reader
+    const reader = h('aside', { class: 'inc-reader', 'aria-label': 'Entries' }, h('div', { class: 'inc-col-head' }, h('strong', { class: 'inc-r-title' }, 'Entries'), h('span', { class: 'inc-r-sub' })), h('div', { class: 'inc-rlist' }));
+    const host = h('div', { id: 'incident' }, head, h('div', { class: 'inc-body' }, findings, main, reader));
+    $('#work').append(host);
+    document.body.classList.add('incident-open');
+    updateWelcome();
+    wireIncidentLanes(lanes);
+    drawTicks();
+    drawWindow();
+    if (st.reader) showReader(st.reader.title, st.reader.sub, st.reader.refs, true);
+    else if (res.findings.length) pickFinding(0);
+    else showReader('Entries', 'Pick a finding, drag a time window or click a dot.', []);
+  }
+
+  function wireIncidentLanes(lanes) {
+    let drag = null;
+    const pctFromX = (track, x) => { const r = track.getBoundingClientRect(); return Math.max(0, Math.min(100, ((x - r.left) / r.width) * 100)); };
+    lanes.addEventListener('pointerdown', (e) => {
+      const track = e.target.closest('.inc-track');
+      if (!track || e.button !== 0) return;
+      drag = { track, x0: e.clientX, p0: pctFromX(track, e.clientX), moved: false, id: e.pointerId };
+    });
+    lanes.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      if (!drag.moved && Math.abs(e.clientX - drag.x0) < 5) return;
+      if (!drag.moved) { drag.moved = true; lanes.setPointerCapture(drag.id); lanes.classList.add('brushing'); }
+      const p = pctFromX(drag.track, e.clientX);
+      incident.win = [tsAt(Math.min(drag.p0, p)), tsAt(Math.max(drag.p0, p))];
+      drawWindow();
+    });
+    const end = (e) => {
+      if (!drag) return;
+      const d = drag;
+      drag = null;
+      lanes.classList.remove('brushing');
+      if (d.moved) { incident.finding = null; markFinding(); showWindowEntries(); return; }
+      // a click: the entries of the dot under the pointer (that log only)
+      const si = +d.track.dataset.s;
+      const bi = Math.min(INCIDENT_BUCKETS - 1, Math.floor(d.p0 / 100 * INCIDENT_BUCKETS));
+      const near = [bi, bi - 1, bi + 1].find((k) => incident.buckets[si][k] && incident.buckets[si][k].total);
+      if (near == null) return;
+      const b = incident.buckets[si][near];
+      const from = incident.res.min + (incident.res.max - incident.res.min) * near / INCIDENT_BUCKETS;
+      showReader(incident.res.services[si].name + ' at ' + Logs.formatTs(from), b.total + ' entr' + (b.total === 1 ? 'y' : 'ies'), b.idx.map((i) => ({ s: si, e: i })));
+    };
+    lanes.addEventListener('pointerup', end);
+    lanes.addEventListener('pointercancel', () => { drag = null; lanes.classList.remove('brushing'); });
+    lanes.addEventListener('dblclick', (e) => {
+      if (!e.target.closest('.inc-track') || !incident.win) return;
+      incident.win = null;
+      incident.finding = null;
+      markFinding();
+      drawWindow();
+      showReader('Entries', 'Pick a finding, drag a time window or click a dot.', []);
+    });
+  }
+
+  // As many time labels as fit the ruler's width (about one per 110 px).
+  function drawTicks() {
+    const host = $('#incident');
+    if (!host || !incident) return;
+    const track = host.querySelector('.inc-ruler-track');
+    const box = host.querySelector('.inc-ticks');
+    const n = Math.max(1, Math.min(8, Math.floor(track.clientWidth / 110)));
+    const res = incident.res;
+    box.replaceChildren(...Array.from({ length: n + 1 }, (_, i) => h('span', { style: 'left:' + (i * 100 / n) + '%' }, Logs.formatTs(res.min + (res.max - res.min) * i / n))));
+  }
+  window.addEventListener('resize', debounce(() => { if ($('#incident')) drawTicks(); }, 120));
+
+  function drawWindow() {
+    const host = $('#incident');
+    if (!host || !incident) return;
+    const w = incident.win;
+    const label = host.querySelector('.inc-win-label');
+    host.querySelectorAll('.inc-win').forEach((el) => {
+      el.hidden = !w;
+      if (w) { el.style.left = pctOf(w[0]) + '%'; el.style.width = Math.max(0.4, pctOf(w[1]) - pctOf(w[0])) + '%'; }
+    });
+    label.hidden = !w;
+    if (w) {
+      // centred on the window, kept inside the ruler
+      label.style.left = Math.max(7, Math.min(93, (pctOf(w[0]) + pctOf(w[1])) / 2)) + '%';
+      label.textContent = Logs.formatTs(w[0]) + ' – ' + Logs.formatTs(w[1]);
+    }
+  }
+  function windowRefs(w) {
+    const out = [];
+    incident.res.services.forEach((s, si) => s.entries.forEach((e, i) => { if (e.ts != null && e.ts >= w[0] && e.ts <= w[1]) out.push({ s: si, e: i }); }));
+    return out;
+  }
+  function showWindowEntries() {
+    const w = incident.win;
+    const refs = windowRefs(w);
+    showReader(Logs.formatTs(w[0]) + ' to ' + Logs.formatTs(w[1]), refs.length + ' entr' + (refs.length === 1 ? 'y' : 'ies') + ' from ' + new Set(refs.map((r) => r.s)).size + ' log' + (new Set(refs.map((r) => r.s)).size === 1 ? '' : 's'), refs);
+  }
+  function pickFinding(i) {
+    const f = incident.res.findings[i];
+    if (!f) return;
+    incident.finding = i;
+    markFinding();
+    if (f.from != null) {
+      const pad = Math.max(1000, (incident.res.max - incident.res.min) * 0.01);
+      incident.win = [Math.max(incident.res.min, f.from - pad), Math.min(incident.res.max, (f.to ?? f.from) + pad)];
+    }
+    drawWindow();
+    if (f.refs.length) showReader(maskText(f.title), maskText(f.detail), f.refs);
+    else showReader(maskText(f.title), maskText(f.detail) + '. Below: everything the other logs wrote meanwhile.', windowRefs(incident.win));
+  }
+  function markFinding() {
+    $$('#incident .inc-f').forEach((el, k) => el.classList.toggle('on', k === incident.finding));
+  }
+  const READER_MAX = 400;
+  function showReader(title, sub, refs, restoring) {
+    const host = $('#incident');
+    if (!host) return;
+    incident.reader = { title, sub, refs };
+    host.querySelector('.inc-r-title').textContent = title;
+    host.querySelector('.inc-r-sub').textContent = sub || '';
+    const list = host.querySelector('.inc-rlist');
+    list.replaceChildren();
+    const svcs = incident.res.services;
+    const rows = refs.map((r) => ({ r, e: svcs[r.s].entries[r.e] })).filter((x) => x.e).sort((a, b) => (a.e.ts ?? 0) - (b.e.ts ?? 0) || a.r.s - b.r.s);
+    for (const { r, e } of rows.slice(0, READER_MAX)) {
+      const s = svcs[r.s];
+      const first = (s.lines[e.start] || '');
+      const msg = e.message || first;
+      const lvl = (e.level || '').toUpperCase();
+      list.append(h('button', { class: 'inc-row lv-' + (lvl || 'none').toLowerCase(), title: 'Open ' + s.file + ' at line ' + (e.start + 1), onclick: () => openIncidentLine(incident.tabs[r.s], e.start + 1) },
+        h('span', { class: 'inc-row-top' },
+          h('span', { class: 'inc-row-ts' }, e.ts != null ? Logs.formatTs(e.ts) + '.' + String(Math.round(e.ts % 1000)).padStart(3, '0') : '—'),
+          h('span', { class: 'inc-row-svc' }, h('i', { style: 'background:' + LANE_TINTS[r.s % LANE_TINTS.length] }), s.name),
+          lvl ? h('span', { class: 'inc-row-lvl' }, lvl) : null,
+          h('span', { class: 'inc-row-ln' }, 'line ' + (e.start + 1))),
+        h('span', { class: 'inc-row-msg' }, msg.length > 400 ? msg.slice(0, 399) + '…' : msg)));
+    }
+    if (!rows.length) list.append(h('p', { class: 'hint inc-empty' }, refs === null ? '' : 'Nothing here. Pick a finding, drag a time window or click a dot.'));
+    if (rows.length > READER_MAX) list.append(h('p', { class: 'hint inc-empty' }, 'Showing the first ' + READER_MAX + ' of ' + rows.length.toLocaleString() + '. Narrow the time window to see the rest.'));
+    if (!restoring) list.scrollTop = 0;
+  }
+  function openIncidentLine(tab, line) {
+    if (!tab || !tabs.includes(tab)) { toast('That log is no longer open.'); return; }
+    removeIncidentView();
+    activate(tab);
+    editor.setPosition({ lineNumber: line, column: 1 });
+    editor.revealLineInCenter(line);
+    editor.focus();
+    toast('Opened ' + tab.name + ' at line ' + line + '.', 8000, { label: 'Back to the incident', run: reopenIncident });
+  }
+  async function copyIncidentFindings() {
+    const res = incident.res;
+    const out = ['Incident: ' + res.services.map((s) => s.name).join(', '), Logs.formatTs(res.min, true) + ' to ' + Logs.formatTs(res.max) + ' (' + Logs.formatDuration(res.max - res.min) + ')', ''];
+    for (const f of res.findings) out.push('- [' + f.kind + '] ' + f.title + (f.from != null ? ' (' + Logs.formatTs(f.from) + (f.to && f.to - f.from >= 1000 ? ' to ' + Logs.formatTs(f.to) : '') + ')' : '') + '\n  ' + f.detail);
+    const m = Logs.maskSecrets(out.join('\n'), settings.mask);
+    const ok = await api.clipboardWrite({ text: m.text });
+    toast(ok === false ? 'Copying was blocked by the browser.' : 'Copied ' + res.findings.length + ' findings' + (m.count ? ', ' + m.count + ' secret value' + (m.count === 1 ? '' : 's') + ' masked' : '') + '.', 4000);
+  }
+
   // Convert the selection (or whole tab) to a table, using every layout we know.
   function convertToTable() {
     const sel = editor.getSelection();
@@ -1931,6 +2224,9 @@
       [['open', 'Tab order'], ['name', 'Name'], ['recent', 'Recently used'], ['type', 'Type']].map(([val, l]) => h('option', { value: val, selected: filesState.sort === val }, l)));
     v.append(h('div', { class: 'fl-tools' }, search, sortSel),
       h('div', { class: 'fl-summary' }, tabs.length + ' open' + (dirty ? ', ' + dirty + ' unsaved' : '') + (splitOpen() ? ', ' + (split.panes.filter((p) => p.tab).length + 1) + ' on screen' : '')));
+    if (tabs.filter((t) => isLogTab(t) && t.model.getValueLength() > 0).length >= 2) {
+      v.append(h('button', { class: 'fl-incident', onclick: pickIncident, title: 'Line the open logs up on one clock and look for what went wrong (Alt+I)' }, 'Investigate these logs together'));
+    }
     const q = filesState.q.trim().toLowerCase();
     let list = tabs.slice();
     if (q) list = list.filter((t) => t.name.toLowerCase().includes(q) || (t.path || '').toLowerCase().includes(q));
@@ -2617,7 +2913,7 @@
   function updateWelcome() {
     const w = $('#welcome');
     if (!w || !active) return;
-    const show = !active.path && active.model.getValueLength() === 0 && !$('#diff') && !document.body.classList.contains('split-open');
+    const show = !active.path && active.model.getValueLength() === 0 && !$('#diff') && !$('#incident') && !document.body.classList.contains('split-open');
     if (w.hidden !== !show) w.hidden = !show;
   }
   async function openSample() {
@@ -4027,6 +4323,9 @@
       ['Find duplicate lines and repeated entries', 'Logs', '', findDuplicates],
       ['Copy shown entries (what the filter shows)', 'Logs', '', copyShown],
       ['Compare with another tab (side-by-side diff)', 'Edit', '', pickCompare],
+      ['Investigate logs together (incident: one clock for several logs)', 'Logs', 'Alt+I', pickIncident],
+      ['Try the incident sample (4 services)', 'Help', '', openIncidentSample],
+      ...(incident && !$('#incident') ? [['Back to the incident', 'Logs', '', reopenIncident]] : []),
       ['Extract timestamps', 'Logs', '', () => extractPreset('timestamps')],
       ['Extract IP addresses', 'Logs', '', () => extractPreset('ips')],
       ['Merge open logs by time', 'Logs', '', mergeOpenLogs],
@@ -4234,6 +4533,7 @@
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyN') actions.new();
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyW') actions.close();
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyT') openTableView();
+    else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyI') { if (incident && !$('#incident')) reopenIncident(); else pickIncident(); }
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyP') setPreview(!(active && active.preview));
     else if (e.altKey && !ctrl && e.shiftKey && e.code === 'KeyP') {
       if (isFullscreen($('#preview'))) exitFullscreen();
@@ -4392,7 +4692,8 @@
     };
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
-    Object.assign(window.__tf, { applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.defineProperty(window.__tf, 'incident', { get: () => incident });
+    Object.assign(window.__tf, { openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
