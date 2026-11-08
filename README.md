@@ -14,6 +14,9 @@ logs automatically.
 - **Logs, detected automatically.** Levels are coloured, there's an error/warning timeline, stack traces fold,
   and you can jump between errors with F8. Filter by level, regex, logger/thread, trace ID or time range, and
   repeated errors are grouped with counts.
+- **Investigate logs together (Alt+I).** Open one log per service and see them as lanes on one clock, with
+  findings spotted for you: errors that spread across services, repeated errors, a service that went quiet, slow
+  calls. Drag a time window to read every log's entries in order; click one to jump to that line.
 - **One query bar (Ctrl+K).** Type `level:warn+ logger:Payment took>1000 after:10:15 -healthcheck` and each
   part becomes a chip; drag on the timeline for a time-range chip. Start with `>` to run a command.
 - **Auto tables.** TextForge learns the message patterns in a log and builds one table per pattern. Whatever

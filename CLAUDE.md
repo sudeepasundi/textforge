@@ -1,7 +1,7 @@
 # TextForge: project context for Claude Code
 
 This file is the hand-off for continuing work on TextForge. Read it fully before changing anything.
-Current version: **0.15.1** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
+Current version: **0.16.0** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
 
 **Direction (agreed 2026-11-07):** move to Tauri 2 + a Rust log engine (also WASM on the web) + Svelte/TypeScript,
 one phase per release; 0.13.0 added the Tauri preview. The UI follows design "D · Focus with tools" from the
@@ -82,6 +82,7 @@ What it does that Notepad++ doesn't:
 | `build-web.js` | Builds `web-dist/selfhost/` (PWA with service worker and manifest) and `web-dist/artifact/TextForge.html` (one file, CSS inlined, Monaco from jsDelivr, `'vs/css': {disabled:true}`). |
 | `assets/` | Icon sources (`icon.svg`, plus `icon-small.svg` for 16–32 px), generated PNGs and `icon.ico`. Regenerate with `node tools/make-icons.js`. |
 | `samples/order-service.log` | Sample Spring Boot log (used by "Try the sample log" and many tests). |
+| `samples/{api-gateway,payment-service,inventory-service}.log` | With order-service: the incident sample (0.16.0), one outage seen from four services. Embedded in the web builds as `TF_WEB.samples`; Electron reads them through `api.sample(name)`. |
 | `packaging/README.txt` | The user-facing README shipped inside the zips. **Append a section for every release.** |
 | `test/` | Unit tests (`*.test.js`) and browser/desktop suites (`*.e2e.js`); see Testing. |
 | `.github/workflows/` | `pages.yml` (website) and `release.yml` (Windows build + Release). |
@@ -120,6 +121,11 @@ command palette (~3628) · misc actions, keyboard shortcuts, init (~3745–end).
   `filterChips(tab.filter)`, each with the patch that removes it; typed text goes through `applyQuery()`. New filter
   syntax needs both: a branch in `applyQuery()` and a chip in `filterChips()`. `filter.took` (ms) is applied after
   `Logs.filterEntries` in `computeVisibility()`, like `filter.lines`.
+- **Incident (0.16.0):** `Logs.incident(sources)` (pure, unit-tested) returns services, the shared span and findings;
+  `Logs.incidentBuckets` feeds the lanes. The view (`renderIncident()` in renderer.js) covers `#work` like the
+  comparison (`#diff`); `incident` keeps its state so "Back to the incident" and Alt+I restore it. Findings mask
+  secrets for display and copying; the reader shows raw lines like the editor. Timestamps from different logs are
+  compared as written (offsets such as +05:30 are not converted yet): logs from different time zones need that next.
 - **Results tabs (0.14.0):** `openPanel(mode, title)` keeps one tab per `mode`; switching stashes the DOM nodes of
   `#panel-tools` / `#panel-body`, so code that fills the panel keeps using those ids as before.
 - **Commands:** add new features to the command palette list (`commands()` in the COMMAND PALETTE
@@ -136,7 +142,7 @@ npm ci                      # Electron + Monaco + packager + jsdom
 npm start                   # desktop app
 node build-web.js           # web builds into web-dist/
 npm run package:win         # dist/TextForge-win32-x64 (then prune node_modules except monaco-editor)
-npm test                    # unit tests: tables 15, logs 15, markdown 8, autotables 9
+npm test                    # unit tests: tables 15, logs 15, markdown 8, autotables 9, incident 9
 npm run package:tauri       # Tauri preview: src-tauri/target/release/textforge.exe (needs Rust + MSVC build tools)
 ```
 
@@ -160,6 +166,7 @@ node test/workspace.e2e.js     # 22  panel resize, tab rename/reorder, multi-pan
 node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
 node test/files.e2e.js         # 19  Open files list
 node test/fullscreen.e2e.js    # 38  resize and full screen everywhere, including appearance checks
+node test/incident.e2e.js      # 24  incident view: lanes, findings, time window, reader, jump to a line and back, phone
 node test/querybar.e2e.js      # 39  design D: query bar, time chip, count filters, result tabs, patterns, selection toolbar, badge
 xvfb-run -a node test/ui-desktop.e2e.js   # 9  Electron: title bar, Copilot resize, full-screen window restore
 ```
@@ -236,7 +243,9 @@ Suggested next (agreed or offered to the owner):
   Offered: add "Compare with…" to the tab right-click menu and the Open files list, plus a shortcut.
 - **Filters in split view** always come from the main editor; setting a filter while a pane has
   focus could apply from that pane instead.
-- **Request-across-services timeline:** follow one traceId across several service logs, hop by hop.
+- **Request-across-services timeline (next: 0.17.0):** follow one traceId across the incident's logs as a waterfall,
+  with a plain-language summary (design canvas https://claude.ai/artifact/2VGRdPu3k1zdigmbMLr3Pm, board 2). Then
+  0.18.0: pin findings with notes and copy them as a rich report for Teams.
 - **Charts from auto tables:** a number column over time, p95 per endpoint, status breakdown.
 - **One filter query box:** e.g. `level:error logger:Payment took>1000 after:10:15`, with chips.
 - **Tabs in the bottom panel,** so several results stay open, with "pop out table".

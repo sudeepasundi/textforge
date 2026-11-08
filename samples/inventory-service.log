@@ -1,0 +1,9 @@
+2026-11-02T10:15:03.004+05:30  INFO 18190 --- [inventory-service] [           main] c.e.inventory.InventoryApplication       : Starting InventoryApplication v1.9.3 using Java 21.0.4 with PID 18190
+2026-11-02T10:15:08.661+05:30  INFO 18190 --- [inventory-service] [           main] c.e.inventory.InventoryApplication       : Started InventoryApplication in 5.657 seconds
+2026-11-02T10:15:45.100+05:30  INFO 18190 --- [inventory-service] [ntainer#0-0-C-1] c.e.inventory.kafka.StockEventsListener  : topic=stock-events partition=0 offset=5120 processed sku=SKU-1002 took 9ms
+2026-11-02T10:16:10.050+05:30  INFO 18190 --- [inventory-service] [nio-8084-exec-1] c.e.inventory.web.ReservationController  : traceId=6f1c2a9be0d34f11 reserved 2 items for orderId=90001 took 12ms
+2026-11-02T10:16:21.060+05:30  INFO 18190 --- [inventory-service] [nio-8084-exec-2] c.e.inventory.web.ReservationController  : traceId=d2f8b6a1c9e04e77 reserved 1 item for orderId=90004 took 11ms
+2026-11-02T10:16:50.230+05:30  INFO 18190 --- [inventory-service] [ntainer#0-0-C-1] c.e.inventory.kafka.StockEventsListener  : topic=stock-events partition=0 offset=5121 processed sku=SKU-7781 took 8ms
+2026-11-02T10:17:15.402+05:30  INFO 18190 --- [inventory-service] [   scheduling-1] c.e.inventory.jobs.ReleaseExpiredHolds   : released 3 holds for orders that never paid (90002, 90005, 90006)
+2026-11-02T10:17:45.811+05:30 ERROR 18190 --- [inventory-service] [nio-8084-exec-3] c.e.inventory.web.ReservationController  : traceId=0c1d2e3f40516273 Stock reservation rejected for orderId=90010: SKU-7781 has 0 left
+2026-11-02T10:18:12.070+05:30  INFO 18190 --- [inventory-service] [nio-8084-exec-4] c.e.inventory.web.ReservationController  : traceId=e4d3c2b1a0f9e8d7 reserved 1 item for orderId=90008 took 10ms

@@ -1,12 +1,12 @@
 {
   "name": "textforge",
   "productName": "TextForge",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "A log-aware text editor for backend developers",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node test/tables.test.js && node test/logs.test.js && node test/markdown.test.js && node test/autotables.test.js",
+    "test": "node test/tables.test.js && node test/logs.test.js && node test/markdown.test.js && node test/autotables.test.js && node test/incident.test.js",
     "test:e2e": "node test/checklist.e2e.js",
     "test:ui": "node test/ui.e2e.js",
     "test:ui:desktop": "node test/ui-desktop.e2e.js",
@@ -20,6 +20,7 @@
     "test:files": "node test/files.e2e.js",
     "test:fullscreen": "node test/fullscreen.e2e.js",
     "test:querybar": "node test/querybar.e2e.js",
+    "test:incident": "node test/incident.e2e.js",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "package:tauri": "tauri build --no-bundle"

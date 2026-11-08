@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('api', {
   stat: (p) => ipcRenderer.invoke('file:stat', p),
   readFrom: (p, offset) => ipcRenderer.invoke('file:readFrom', p, offset),
   liveFiles: true,
-  sample: () => ipcRenderer.invoke('sample'),
+  sample: (name) => ipcRenderer.invoke('sample', name),
   saveFile: (args) => ipcRenderer.invoke('file:save', args),
   renameFile: (args) => ipcRenderer.invoke('file:rename', args),
   saveAs: (args) => ipcRenderer.invoke('dialog:saveAs', args),

@@ -270,3 +270,16 @@ UPDATES REACH OPEN TABS, COPILOT BUTTON STAYS PUT (0.15.1)
   results panel, where it could end up over the editor text.
   Copilot in full screen (browser version) keeps its introduction at a readable width.
   Help (?) shows which version you are running; so does hovering the TextForge logo.
+
+INVESTIGATE LOGS TOGETHER: THE INCIDENT VIEW (0.16.0)
+  Open the logs of several services (one file each) and press Alt+I, or use "Investigate
+  these logs together" at the top of the Open files list. Each log becomes a lane on one
+  shared clock; dots are entries (bigger = more, red = errors, amber = warnings).
+  On the left, findings TextForge spots by itself: errors that hit several services at
+  the same moment, repeated errors, a service that goes quiet while the others report
+  errors calling it, and slow calls. Click one to see its lines.
+  Drag across the lanes to look at a time window: the list on the right shows every log's
+  entries for that window in time order. Double-click clears it. Click a dot for its
+  entries. Click any entry to open that log at that line; "Back to the incident" returns.
+  Copy findings gives a short text report with secrets masked.
+  To try it: command palette (Ctrl+Shift+P) > "Try the incident sample".

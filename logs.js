@@ -1003,7 +1003,148 @@
     return intro + ctx + '\n\n```\n' + truncateMiddle(text.trim(), maxChars) + '\n```';
   }
 
+  // ---------------- incident: several logs on one clock (0.16.0) ----------------
+  // sources: [{ name, lines, entries }] (entries from parseEntries). Returns the services, the shared time span
+  // and findings TextForge spots by itself: repeated errors, errors in several services at once, a service that
+  // goes quiet while the others are in trouble, and slow calls.
+  // "took 1534ms", "took: 2.1 s", "502 in 1560ms" ("in" only with ms: "4 failures in 60s" is not a call)
+  const TOOK_RE = /\btook[\s:=]*(\d+(?:\.\d+)?)\s*(ms|s)\b/i;
+  const IN_MS_RE = /\bin\s*(\d+(?:\.\d+)?)\s*ms\b/i;
+  function durationMs(line) {
+    const t = TOOK_RE.exec(line || '');
+    if (t) return Number(t[1]) * (t[2].toLowerCase() === 's' ? 1000 : 1);
+    const m = IN_MS_RE.exec(line || '');
+    return m ? Number(m[1]) : null;
+  }
+  // A finding's title: the entry's own message, without the trace ID it starts with.
+  const cleanMessage = (m) => String(m || '').replace(/^\s*(?:trace[_-]?id)[=:]\s*[\w-]+[\s,;]*/i, '').replace(/\s+/g, ' ').trim();
+  const cutText = (m, n) => (m.length > n ? m.slice(0, n - 1).trimEnd() + '…' : m);
+  function joinNames(names) {
+    return names.length <= 1 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  }
+  function serviceName(src) {
+    const counts = {};
+    for (const e of src.entries) if (e.app) counts[e.app] = (counts[e.app] || 0) + 1;
+    let best = null;
+    let n = 0;
+    for (const k in counts) if (counts[k] > n) { n = counts[k]; best = k; }
+    return best || String(src.name || 'log').replace(/\.(log|txt|out|json)$/i, '');
+  }
+  function incident(sources, opts = {}) {
+    const services = sources.map((s, i) => {
+      let min = null;
+      let max = null;
+      for (const e of s.entries) if (e.ts != null) { if (min == null || e.ts < min) min = e.ts; if (max == null || e.ts > max) max = e.ts; }
+      return { index: i, name: serviceName(s), file: s.name, entries: s.entries, lines: s.lines, counts: levelCounts(s.entries), min, max };
+    });
+    const seen = {};
+    services.forEach((s) => { seen[s.name] = (seen[s.name] || 0) + 1; });
+    services.forEach((s) => { if (seen[s.name] > 1) s.name = s.name + ' (' + s.file + ')'; }); // two files of one service stay apart
+    const timed = services.filter((s) => s.min != null);
+    const min = timed.length ? Math.min(...timed.map((s) => s.min)) : null;
+    const max = timed.length ? Math.max(...timed.map((s) => s.max)) : null;
+    const findings = [];
+    const ref = (s, i) => ({ s: s.index, e: i });
+
+    // 1. errors, grouped by message within each service
+    for (const s of services) {
+      for (const g of groupErrors(s.entries, s.lines, { levels: ['ERROR'] })) {
+        const first = s.entries[g.entries[0]];
+        const msg = cleanMessage(first && first.message) || g.title;
+        const exc = g.exception ? String(g.exception).split('.').pop() : '';
+        findings.push({ kind: 'error', severity: g.count > 1 ? 3 : 2, title: cutText(msg, 110), services: [s.name], count: g.count, from: g.firstTs, to: g.lastTs,
+          refs: g.entries.slice(0, 200).map((i) => ref(s, i)), detail: (g.count > 1 ? g.count + ' times' : 'Once') + ' in ' + s.name + (exc && !msg.includes(exc) ? ' · ' + exc : '') });
+      }
+    }
+    // 2. errors in two or more services within a few seconds: one failure spreading
+    const errs = [];
+    for (const s of services) s.entries.forEach((e, i) => { if (e.level === 'ERROR' && e.ts != null) errs.push({ s, i, ts: e.ts }); });
+    errs.sort((a, b) => a.ts - b.ts);
+    const together = opts.togetherMs || 5000;
+    let cluster = [];
+    const flush = () => {
+      const names = [...new Set(cluster.map((x) => x.s.name))];
+      if (names.length >= 2) {
+        const span = cluster[cluster.length - 1].ts - cluster[0].ts;
+        findings.push({ kind: 'together', severity: 4, title: 'Errors in ' + joinNames(names) + (span < 1000 ? ' at the same moment' : ' within ' + formatDuration(span)),
+          services: names, count: cluster.length, from: cluster[0].ts, to: cluster[cluster.length - 1].ts, refs: cluster.slice(0, 500).map((x) => ref(x.s, x.i)),
+          detail: cluster.length + ' errors, first in ' + cluster[0].s.name });
+      }
+      cluster = [];
+    };
+    for (const x of errs) { if (cluster.length && x.ts - cluster[cluster.length - 1].ts > together) flush(); cluster.push(x); }
+    if (cluster.length) flush();
+    // 3. a service that stops logging while the others keep going and report errors calling it
+    //    (a service that is simply idle is not a finding: the others have to name it in their warnings or errors)
+    // Sorted timestamps (all entries, and warnings/errors) per service, so a time window is two binary searches.
+    const lowerBound = (arr, x, key) => { let lo = 0; let hi = arr.length; while (lo < hi) { const mid = (lo + hi) >> 1; if ((key ? arr[mid][key] : arr[mid]) <= x) lo = mid + 1; else hi = mid; } return lo; };
+    const sortedTs = services.map((s) => s.entries.filter((e) => e.ts != null).map((e) => e.ts).sort((a, b) => a - b));
+    const troubleList = services.map((s) => s.entries.filter((e) => e.ts != null && (e.level === 'ERROR' || e.level === 'WARN')).sort((a, b) => a.ts - b.ts));
+    for (const s of services) {
+      const base = s.name.replace(/ \(.*\)$/, '').toLowerCase();
+      const names = base.length >= 4 ? [base] : []; // the full name only: "order" would match every /api/orders line
+      const ts = sortedTs[s.index];
+      if (ts.length < 4 || !names.length) continue;
+      const gaps = [];
+      for (let k = 1; k < ts.length; k++) gaps.push({ g: ts[k] - ts[k - 1], k });
+      const bySize = gaps.slice().sort((a, b) => a.g - b.g);
+      const median = bySize[Math.floor(bySize.length / 2)].g;
+      const threshold = Math.max(opts.quietMs || 20000, median * 8);
+      let best = null;
+      for (const { g, k } of bySize.slice(-5).reverse()) { // the five longest silences are enough
+        if (g < threshold) break;
+        const a = ts[k - 1];
+        const b = ts[k];
+        let others = 0;
+        let trouble = 0;
+        for (const o of services) {
+          if (o === s) continue;
+          const arr = sortedTs[o.index];
+          others += Math.max(0, lowerBound(arr, b - 1) - lowerBound(arr, a));
+          const tl = troubleList[o.index];
+          for (let j = lowerBound(tl, a, 'ts'); j < tl.length && tl[j].ts < b && trouble < 50; j++) {
+            if (names.some((n) => entryText(o.lines, tl[j], 30).toLowerCase().includes(n))) trouble++;
+          }
+        }
+        if (others >= 3 && trouble >= 1 && (!best || g > best.g)) best = { g, a, b, others, trouble };
+      }
+      if (best) {
+        findings.push({ kind: 'quiet', severity: 3, title: s.name + ' went quiet for ' + formatDuration(best.g), services: [s.name], count: 0, from: best.a, to: best.b, refs: [],
+          detail: 'Nothing logged while the other services wrote ' + best.others + ' entries; ' + best.trouble + ' of their warnings or errors name it' });
+      }
+    }
+    // 4. slow calls ("took 1534ms", "in 2.2 s")
+    const slowMs = opts.slowMs || 1000;
+    for (const s of services) {
+      const slow = [];
+      s.entries.forEach((e, i) => { const ms = durationMs(s.lines[e.start]); if (ms != null && ms >= slowMs) slow.push({ i, ms, ts: e.ts }); });
+      if (!slow.length) continue;
+      const worst = slow.reduce((a, b) => (b.ms > a.ms ? b : a));
+      const times = slow.map((x) => x.ts).filter((x) => x != null);
+      findings.push({ kind: 'slow', severity: 1, title: slow.length + ' slow call' + (slow.length === 1 ? '' : 's') + ' in ' + s.name, services: [s.name], count: slow.length,
+        from: times.length ? Math.min(...times) : null, to: times.length ? Math.max(...times) : null, refs: slow.slice(0, 500).map((x) => ref(s, x.i)),
+        detail: 'Slowest ' + formatDuration(worst.ms) + ' · ' + formatDuration(slowMs) + ' or more' });
+    }
+    findings.sort((a, b) => b.severity - a.severity || b.count - a.count || (a.from ?? 0) - (b.from ?? 0));
+    return { services, min, max, findings: findings.slice(0, opts.maxFindings || 40) };
+  }
+  // Each service's entries in n equal slices of the shared time span (for the lanes).
+  function incidentBuckets(service, min, max, n) {
+    const span = Math.max(1, max - min);
+    const out = Array.from({ length: n }, () => ({ total: 0, error: 0, warn: 0, idx: [] }));
+    service.entries.forEach((e, i) => {
+      if (e.ts == null) return;
+      const b = out[Math.min(n - 1, Math.max(0, Math.floor(((e.ts - min) / span) * n)))];
+      b.total++;
+      if (e.level === 'ERROR') b.error++;
+      else if (e.level === 'WARN') b.warn++;
+      if (b.idx.length < 500) b.idx.push(i);
+    });
+    return out;
+  }
+
   return {
+    incident, incidentBuckets, serviceName, durationMs,
     LEVEL_CHIPS, FORMAT_LABELS, PRESETS, autoTables, EXC_RE, FRAME_RE, STACK_LINE_RE,
     normLevel, findTimestamp, parseTimeInput, findTraceId, parseLine, parseEntries, isLogText, entryIndexAt,
     levelCounts, entryText, filterEntries, normalizeMsg, packagesRegex, groupErrors, timeline, formatDuration,
