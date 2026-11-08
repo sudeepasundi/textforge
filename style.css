@@ -1018,3 +1018,43 @@ body.incident-open #signal { display: none !important; }
   .inc-wf-scale span:nth-child(2), .inc-wf-scale span:nth-child(4) { display: none; }
   #incident .pv-head button[title^="Copy the findings"] { display: none; }
 }
+
+/* ---- incident: pins and the report (0.18.0) ---- */
+.inc-f-wrap { position: relative; }
+.inc-f-wrap .inc-f { width: 100%; }
+.inc-f-wrap .inc-f-top { padding-right: 30px; }
+.inc-pin { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border: 1px solid transparent; border-radius: 7px; background: none; color: var(--muted); }
+.inc-pin svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; }
+.inc-pin:hover { border-color: var(--line); color: var(--fg); background: var(--raised); }
+.inc-pin.on { color: var(--accent-text); background: var(--accent-soft); border-color: var(--accent); }
+.inc-pin.on svg { fill: currentColor; }
+.inc-pin-req.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); font-weight: 600; }
+.inc-mode-n.pinned { background: var(--accent-soft); color: var(--accent-text); }
+.inc-rep-body { grid-template-columns: 380px minmax(0, 1fr); }
+.inc-rep-form { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 4px; padding: 12px 14px 90px; }
+.inc-rep-form .field input, .inc-rep-form .field textarea { width: 100%; box-sizing: border-box; }
+.inc-rep-form textarea { resize: vertical; font: inherit; }
+.inc-rep-pins-head { padding: 12px 0 6px; flex-direction: column; gap: 2px; }
+.inc-pin-list { display: flex; flex-direction: column; gap: 8px; }
+.inc-pin-item { display: flex; flex-direction: column; gap: 6px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.inc-pin-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.inc-pin-title { flex: 1; min-width: 0; font-weight: 600; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inc-pin-top .icon-btn { width: 24px; height: 24px; font-size: 13px; }
+.inc-pin-top .icon-btn[disabled] { opacity: .35; }
+.inc-tag.req { background: var(--accent-soft); color: var(--accent-text); }
+.inc-pin-item textarea { width: 100%; box-sizing: border-box; font: 12.5px/1.45 var(--ui); resize: vertical; }
+.inc-rep-main { min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 14px 18px 90px; }
+.inc-rep-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.inc-rep-tools button { padding: 5px 12px; font-size: 12.5px; }
+.inc-rep-tools .hint { margin: 0 0 0 4px; }
+.inc-rep-paper { padding: 22px 30px; }
+#inc-rep-doc { max-width: 980px; }
+@media (max-width: 1180px) { .inc-rep-body { grid-template-columns: 300px minmax(0, 1fr); } }
+@media (max-width: 760px) {
+  .inc-rep-body { display: flex; flex-direction: column; overflow: auto; }
+  .inc-rep-side { flex: none; max-height: none; }
+  .inc-rep-form { overflow: visible; padding-bottom: 12px; }
+  .inc-rep-main { flex: none; overflow: visible; padding: 12px 10px 90px; }
+  .inc-rep-paper { padding: 14px 14px; }
+}
+#inc-rep-doc pre, #inc-rep-doc pre code { white-space: pre-wrap; word-break: break-word; }

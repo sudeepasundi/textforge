@@ -1,7 +1,7 @@
 # TextForge: project context for Claude Code
 
 This file is the hand-off for continuing work on TextForge. Read it fully before changing anything.
-Current version: **0.17.0** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
+Current version: **0.18.0** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
 
 **Direction (agreed 2026-11-07):** move to Tauri 2 + a Rust log engine (also WASM on the web) + Svelte/TypeScript,
 one phase per release; 0.13.0 added the Tauri preview. The UI follows design "D · Focus with tools" from the
@@ -128,7 +128,11 @@ command palette (~3628) · misc actions, keyboard shortcuts, init (~3745–end).
   compared as written (offsets such as +05:30 are not converted yet): logs from different time zones need that next.
   Requests (0.17.0): `Logs.requests(res)` groups entries by `traceId`; a step per service runs from its first entry
   (moved earlier by a reported duration: "took 1534ms") to its last; `describeRequest()` writes the summary. The
-  incident has two modes (`incident.mode` timeline | requests); summaries are masked for display like findings.
+  incident has three modes (`incident.mode` timeline | requests | report); summaries are masked for display like findings.
+  Report (0.18.0): pins (`incident.pins`) copy what the report needs when pinned (title, detail, evidence lines,
+  steps) and carry the note; `Logs.incidentReport()` writes the Markdown; `reportMarkdown()` masks it;
+  "Copy for Teams / Outlook" uses `richHtml()` (shared with the preview's Copy as rich text). Pins survive
+  reopening the same incident; closing asks first.
 - **Results tabs (0.14.0):** `openPanel(mode, title)` keeps one tab per `mode`; switching stashes the DOM nodes of
   `#panel-tools` / `#panel-body`, so code that fills the panel keeps using those ids as before.
 - **Commands:** add new features to the command palette list (`commands()` in the COMMAND PALETTE
@@ -145,7 +149,7 @@ npm ci                      # Electron + Monaco + packager + jsdom
 npm start                   # desktop app
 node build-web.js           # web builds into web-dist/
 npm run package:win         # dist/TextForge-win32-x64 (then prune node_modules except monaco-editor)
-npm test                    # unit tests: tables 15, logs 15, markdown 8, autotables 9, incident 13
+npm test                    # unit tests: tables 15, logs 15, markdown 8, autotables 9, incident 15
 npm run package:tauri       # Tauri preview: src-tauri/target/release/textforge.exe (needs Rust + MSVC build tools)
 ```
 
@@ -169,7 +173,7 @@ node test/workspace.e2e.js     # 22  panel resize, tab rename/reorder, multi-pan
 node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
 node test/files.e2e.js         # 19  Open files list
 node test/fullscreen.e2e.js    # 38  resize and full screen everywhere, including appearance checks
-node test/incident.e2e.js      # 34  incident view: lanes, findings, time window, reader, jump to a line, follow a request, phone
+node test/incident.e2e.js      # 45  incident view: lanes, findings, time window, reader, jump to a line, requests, pins and report, phone
 node test/querybar.e2e.js      # 39  design D: query bar, time chip, count filters, result tabs, patterns, selection toolbar, badge
 xvfb-run -a node test/ui-desktop.e2e.js   # 9  Electron: title bar, Copilot resize, full-screen window restore
 ```
@@ -246,9 +250,9 @@ Suggested next (agreed or offered to the owner):
   Offered: add "Compare with…" to the tab right-click menu and the Open files list, plus a shortcut.
 - **Filters in split view** always come from the main editor; setting a filter while a pane has
   focus could apply from that pane instead.
-- **Next (0.18.0):** pin findings and requests with notes in the incident and copy them as a rich report for Teams
-  (design canvas https://claude.ai/artifact/2VGRdPu3k1zdigmbMLr3Pm). Also: convert time-zone offsets so logs from
-  different zones line up.
+- **Incident next:** convert time-zone offsets so logs from different zones line up; keep incidents (with their
+  report) in the session so they survive a restart; the phone layout from board 3 of the design canvas
+  (https://claude.ai/artifact/2VGRdPu3k1zdigmbMLr3Pm).
 - **Charts from auto tables:** a number column over time, p95 per endpoint, status breakdown.
 - **One filter query box:** e.g. `level:error logger:Payment took>1000 after:10:15`, with chips.
 - **Tabs in the bottom panel,** so several results stay open, with "pop out table".

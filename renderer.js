@@ -1121,8 +1121,10 @@
   }
 
   // Rich HTML for Teams / Outlook / Word: the preview with inline styles, without our buttons.
-  function previewRichHtml() {
-    const clone = $('#preview-doc').cloneNode(true);
+  function previewRichHtml() { return richHtml($('#preview-doc')); }
+  // A rendered Markdown element as HTML that keeps its look when pasted into Teams, Outlook or Word.
+  function richHtml(el) {
+    const clone = el.cloneNode(true);
     clone.querySelectorAll('.md-table-tools, input').forEach((x) => x.remove());
     clone.querySelectorAll('[data-line]').forEach((x) => x.removeAttribute('data-line'));
     clone.querySelectorAll('table').forEach((t) => { t.removeAttribute('class'); t.setAttribute('border', '1'); t.setAttribute('cellspacing', '0'); t.setAttribute('cellpadding', '4'); t.style.cssText = 'border-collapse:collapse;font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:11pt'; });
@@ -1294,7 +1296,11 @@
     const sources = list.map((t) => { const an = analyze(t) || { entries: [], lines: t.model.getLinesContent() }; return { name: t.name, lines: an.lines, entries: an.entries }; });
     const res = Logs.incident(sources);
     if (res.min == null) { toast('These logs have no timestamps, so they cannot be lined up on one clock.', 6000); return; }
-    incident = { tabs: list.slice(), res, buckets: res.services.map((s) => Logs.incidentBuckets(s, res.min, res.max, INCIDENT_BUCKETS)), win: null, finding: null, reader: null };
+    // reopening the same incident (for example after a log was closed) keeps the report; a new one starts empty
+    const same = incident && list.every((t) => incident.tabs.includes(t));
+    const kept = same && incident.pins && incident.pins.length ? { pins: incident.pins, report: incident.report } : null;
+    incident = { tabs: list.slice(), res, buckets: res.services.map((s) => Logs.incidentBuckets(s, res.min, res.max, INCIDENT_BUCKETS)), win: null, finding: null, reader: null,
+      pins: kept ? kept.pins : [], report: kept ? kept.report : { title: 'Incident ' + Logs.formatTs(res.min, true).slice(0, 16), summary: '' } };
     renderIncident();
   }
   function removeIncidentView() {
@@ -1304,7 +1310,14 @@
     document.body.classList.remove('incident-open');
     updateWelcome();
   }
-  function closeIncident() { removeIncidentView(); incident = null; if (editor) setTimeout(() => editor.layout(), 0); }
+  async function closeIncident() {
+    if (incident && incident.pins.length) {
+      const go = await modal('Close the incident?', '<p>Your report has ' + incident.pins.length + ' pinned item' + (incident.pins.length === 1 ? '' : 's') + '. Closing the incident forgets them. Copy the report or open it as a tab first if you want to keep it.</p>',
+        [{ label: 'Keep it open', value: false }, { label: 'Close', value: true, primary: true }]);
+      if (!go) return;
+    }
+    removeIncidentView(); incident = null; if (editor) setTimeout(() => editor.layout(), 0);
+  }
   function reopenIncident() {
     if (!incident) return;
     const alive = incident.tabs.filter((t) => tabs.includes(t));
@@ -1323,10 +1336,13 @@
     const reqs = incidentRequests();
     const failedN = reqs.filter((r) => r.failed).length;
     const inRequests = st.mode === 'requests';
+    const inReport = st.mode === 'report';
     const modes = h('div', { class: 'inc-modes', role: 'tablist', 'aria-label': 'Incident view' },
-      h('button', { role: 'tab', class: inRequests ? '' : 'on', 'aria-selected': String(!inRequests), onclick: () => setIncidentMode('timeline'), title: 'All logs on one clock, with findings' }, 'Timeline'),
+      h('button', { role: 'tab', class: inRequests || inReport ? '' : 'on', 'aria-selected': String(!inRequests && !inReport), onclick: () => setIncidentMode('timeline'), title: 'All logs on one clock, with findings' }, 'Timeline'),
       h('button', { role: 'tab', class: inRequests ? 'on' : '', 'aria-selected': String(inRequests), onclick: () => setIncidentMode('requests'), title: 'Follow one request across the logs' }, 'Requests',
-        h('span', { class: 'inc-mode-n' + (failedN ? ' bad' : '') }, failedN ? failedN + ' failed' : String(reqs.length))));
+        h('span', { class: 'inc-mode-n' + (failedN ? ' bad' : '') }, failedN ? failedN + ' failed' : String(reqs.length))),
+      h('button', { role: 'tab', class: st.mode === 'report' ? 'on' : '', 'aria-selected': String(st.mode === 'report'), onclick: () => setIncidentMode('report'), title: 'What you pinned, with your notes, ready for Teams or a ticket' }, 'Report',
+        h('span', { class: 'inc-mode-n inc-pin-count' + (st.pins.length ? ' pinned' : '') }, String(st.pins.length))));
     const head = h('div', { class: 'pv-head inc-head' },
       h('strong', null, 'Incident'), h('span', { class: 'inc-sub' }, res.services.length + ' logs · ' + Logs.formatTs(res.min) + ' to ' + Logs.formatTs(res.max) + ' · ' + Logs.formatDuration(res.max - res.min)),
       h('span', { class: 'grow' }), modes, h('span', { class: 'grow' }),
@@ -1334,6 +1350,13 @@
       fsBtn,
       h('button', { class: 'icon-btn small', title: 'Close the incident (your tabs stay open)', 'aria-label': 'Close the incident', html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>', onclick: closeIncident }));
     head.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleFullscreen($('#incident'), { label: 'The incident' }); });
+    if (inReport) {
+      $('#work').append(h('div', { id: 'incident', class: 'inc-report-mode' }, head, buildReportBody()));
+      document.body.classList.add('incident-open');
+      updateWelcome();
+      renderReportPreview();
+      return;
+    }
     if (inRequests) {
       $('#work').append(h('div', { id: 'incident', class: 'inc-requests-mode' }, head, buildRequestsBody()));
       document.body.classList.add('incident-open');
@@ -1347,10 +1370,11 @@
     const KIND = { together: 'together', error: 'error', quiet: 'quiet', slow: 'slow' };
     res.findings.forEach((f, i) => {
       const when = f.from == null ? '' : Logs.formatTs(f.from) + (f.to && f.to - f.from >= 1000 ? ' to ' + Logs.formatTs(f.to) : '');
-      fList.append(h('button', { class: 'inc-f k-' + f.kind + (st.finding === i ? ' on' : ''), role: 'listitem', onclick: () => pickFinding(i) },
+      const card = h('button', { class: 'inc-f k-' + f.kind + (st.finding === i ? ' on' : ''), onclick: () => pickFinding(i) },
         h('span', { class: 'inc-f-top' }, h('span', { class: 'inc-tag' }, KIND[f.kind] || f.kind), h('span', { class: 'inc-when' }, when)),
         h('span', { class: 'inc-f-title' }, maskText(f.title)),
-        h('span', { class: 'inc-f-detail' }, maskText(f.detail))));
+        h('span', { class: 'inc-f-detail' }, maskText(f.detail)));
+      fList.append(h('div', { class: 'inc-f-wrap', role: 'listitem' }, card, pinButton(findingKey(f), () => pinFinding(i))));
     });
     if (!res.findings.length) fList.append(h('p', { class: 'hint' }, 'Nothing stands out: no errors, quiet services or slow calls.'));
     const findings = h('aside', { class: 'inc-findings', 'aria-label': 'Findings' },
@@ -1629,6 +1653,7 @@
         h('span', { class: 'inc-rq-when' }, (rq.route ? rq.route + ' · ' : '') + Logs.formatTs(rq.from) + ' · ' + fmtMs(rq.ms))),
       h('p', { class: 'inc-rq-text' }, maskText(rq.summary)),
       h('div', { class: 'inc-rq-actions' },
+        pinRequestButton(rq),
         h('button', { onclick: () => showRequestOnTimeline(rq), title: 'See these entries among everything else that happened at the time' }, 'Show on the timeline'),
         h('button', { onclick: async () => { const ok = await api.clipboardWrite({ text: 'Request ' + rq.id + '\n' + maskText(rq.summary) }); toast(ok === false ? 'Copying was blocked by the browser.' : 'Copied the summary (secrets masked).', 2500); } }, 'Copy summary')));
     // waterfall
@@ -1665,6 +1690,139 @@
       h('div', { class: 'inc-rq-lhead' }, h('strong', null, 'Lines behind “' + maskText(step.label) + '”'), h('span', null, svc.file + ' · ' + step.refs.length + ' entr' + (step.refs.length === 1 ? 'y' : 'ies'))),
       h('div', { class: 'inc-rq-code' }, ...out.map((x) => h('button', { class: 'inc-code-line lv-' + (x.lvl || 'none'), title: 'Open ' + svc.file + ' at line ' + (x.l + 1), onclick: () => openIncidentLine(tab, x.l + 1) },
         h('span', { class: 'inc-code-n' }, String(x.l + 1)), h('span', { class: 'inc-code-t' }, x.text)))));
+  }
+
+  // ---------- pins and the report (0.18.0) ----------
+  // Pinning copies what the report needs (title, detail, a few evidence lines, the request's steps) at that
+  // moment, so the report stays as it was when you pinned it. Notes are typed in the Report tab.
+  const findingKey = (f) => 'f|' + f.kind + '|' + f.title + '|' + f.from;
+  const isPinned = (key) => !!(incident && incident.pins.some((p) => p.key === key));
+  const PIN_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 4 3v2H6v-2l4-3zM12 14v7"/></svg>';
+  function pinButton(key, onToggle) {
+    const on = isPinned(key);
+    const b = h('button', { class: 'inc-pin' + (on ? ' on' : ''), 'data-key': key, 'aria-pressed': String(on), title: on ? 'Pinned to the report. Click to unpin.' : 'Pin to the report', 'aria-label': on ? 'Unpin from the report' : 'Pin to the report', onclick: (e) => { e.stopPropagation(); onToggle(); } });
+    b.innerHTML = PIN_SVG;
+    return b;
+  }
+  function pinRequestButton(rq) {
+    const on = isPinned('r|' + rq.id);
+    return h('button', { class: 'inc-pin-req' + (on ? ' on' : ''), 'data-key': 'r|' + rq.id, 'aria-pressed': String(on), onclick: () => pinRequest(rq) }, on ? 'Pinned to the report ✓' : 'Pin to report');
+  }
+  function evidenceLines(refs, max = 4) {
+    const svcs = incident.res.services;
+    return refs.map((r) => ({ r, e: svcs[r.s].entries[r.e] })).filter((x) => x.e).sort((a, b) => (a.e.ts ?? 0) - (b.e.ts ?? 0)).slice(0, max)
+      // short enough to read in Teams: time, level, service and the message (the file and line are listed below it)
+      .map(({ r, e }) => {
+        const msg = (e.message || svcs[r.s].lines[e.start] || '').replace(/\s+/g, ' ').trim().replace(/^trace[_-]?id[=:]\s*[\w-]+[\s,;]*/i, '');
+        const ts = e.ts != null ? Logs.formatTs(e.ts) + '.' + String(Math.round(e.ts % 1000)).padStart(3, '0') + ' ' : '';
+        const text = ts + (e.level ? e.level + ' ' : '') + svcs[r.s].name + ': ' + msg;
+        return { file: svcs[r.s].file, line: e.start + 1, text: text.length > 220 ? text.slice(0, 219) + '…' : text };
+      });
+  }
+  function togglePin(item) {
+    const i = incident.pins.findIndex((p) => p.key === item.key);
+    if (i >= 0) incident.pins.splice(i, 1);
+    else incident.pins.push(item);
+    refreshPins();
+    toast(i >= 0 ? 'Unpinned.' : 'Pinned to the report (' + incident.pins.length + ').', 1800);
+  }
+  function pinFinding(i) {
+    const f = incident.res.findings[i];
+    if (!f) return;
+    let refs = f.refs;
+    if (!refs.length && f.kind === 'quiet') { // the quiet service's last entry before and first after the silence
+      const si = incident.res.services.findIndex((s) => s.name === f.services[0]);
+      refs = incident.res.services[si].entries.map((e, ei) => ({ s: si, e: ei, ts: e.ts })).filter((x) => x.ts === f.from || x.ts === f.to);
+    }
+    togglePin({ key: findingKey(f), type: 'finding', kind: f.kind, title: f.title, detail: f.detail,
+      when: f.from == null ? '' : Logs.formatTs(f.from) + (f.to && f.to - f.from >= 1000 ? ' to ' + Logs.formatTs(f.to) : ''), evidence: evidenceLines(refs), note: '' });
+  }
+  function pinRequest(rq) {
+    togglePin({ key: 'r|' + rq.id, type: 'request', id: rq.id, state: rqState(rq), status: rq.status, summary: rq.summary,
+      steps: rq.steps.map((s) => ({ service: s.service, label: s.label, took: fmtMs(s.to - s.from), result: s.level === 'ok' ? 'ok' : s.level === 'warn' ? 'warning' : 'error' })), note: '' });
+  }
+  // Update every pin control and the Report count without rebuilding the view (lists keep their scroll).
+  function refreshPins() {
+    const host = $('#incident');
+    if (!host) return;
+    const n = incident.pins.length;
+    const c = host.querySelector('.inc-pin-count');
+    if (c) { c.textContent = String(n); c.classList.toggle('pinned', n > 0); }
+    host.querySelectorAll('.inc-pin').forEach((b) => {
+      const on = isPinned(b.dataset.key);
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', String(on));
+      b.title = on ? 'Pinned to the report. Click to unpin.' : 'Pin to the report';
+      b.setAttribute('aria-label', on ? 'Unpin from the report' : 'Pin to the report');
+    });
+    host.querySelectorAll('.inc-pin-req').forEach((b) => {
+      const on = isPinned(b.dataset.key);
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', String(on));
+      b.textContent = on ? 'Pinned to the report ✓' : 'Pin to report';
+    });
+  }
+  function reportMarkdown() {
+    const res = incident.res;
+    const md = Logs.incidentReport({ title: incident.report.title, summary: incident.report.summary, from: res.min, to: res.max, services: res.services.map((s) => s.name), pins: incident.pins });
+    return Logs.maskSecrets(md, settings.mask).text;
+  }
+  function buildReportBody() {
+    const st = incident;
+    const rp = st.report;
+    const later = debounce(renderReportPreview, 200);
+    const title = h('input', { type: 'text', value: rp.title, 'aria-label': 'Report title', oninput: (e) => { rp.title = e.target.value; later(); } });
+    const summary = h('textarea', { rows: 4, placeholder: 'In a few lines: what broke, who was affected, what fixed it.', 'aria-label': 'What happened', oninput: (e) => { rp.summary = e.target.value; later(); } });
+    summary.value = rp.summary;
+    const list = h('div', { class: 'inc-pin-list' });
+    const drawList = () => {
+      list.replaceChildren();
+      if (!st.pins.length) {
+        list.append(h('p', { class: 'hint' }, 'Nothing pinned yet. Use the pin on a finding (Timeline) or "Pin to report" on a request (Requests) to collect what matters here.'));
+        return;
+      }
+      st.pins.forEach((p, i) => {
+        const note = h('textarea', { rows: 2, placeholder: 'Your note (optional)', 'aria-label': 'Note for ' + p.title, oninput: (e) => { p.note = e.target.value; later(); } });
+        note.value = p.note || '';
+        const move = (d) => { const j = i + d; if (j < 0 || j >= st.pins.length) return; [st.pins[i], st.pins[j]] = [st.pins[j], st.pins[i]]; drawList(); renderReportPreview(); };
+        list.append(h('div', { class: 'inc-pin-item' },
+          h('div', { class: 'inc-pin-top' },
+            h('span', { class: 'inc-tag' + (p.type === 'request' ? ' req' : '') }, p.type === 'request' ? 'request' : p.kind),
+            h('span', { class: 'inc-pin-title' }, maskText(p.type === 'request' ? p.id.slice(0, 8) + ' · ' + p.state + (p.status ? ' · ' + p.status : '') : p.title)),
+            h('button', { class: 'icon-btn small', title: 'Move up', 'aria-label': 'Move up', disabled: i === 0, onclick: () => move(-1) }, '↑'),
+            h('button', { class: 'icon-btn small', title: 'Move down', 'aria-label': 'Move down', disabled: i === st.pins.length - 1, onclick: () => move(1) }, '↓'),
+            h('button', { class: 'icon-btn small', title: 'Remove from the report', 'aria-label': 'Remove from the report', onclick: () => { st.pins.splice(i, 1); drawList(); refreshPins(); renderReportPreview(); } }, '×')),
+          note));
+      });
+    };
+    drawList();
+    const side = h('aside', { class: 'inc-findings inc-rep-side', 'aria-label': 'Report contents' },
+      h('div', { class: 'inc-rep-form' },
+        h('div', { class: 'field' }, h('label', null, 'Title'), title),
+        h('div', { class: 'field' }, h('label', null, 'What happened'), summary),
+        h('div', { class: 'inc-col-head inc-rep-pins-head' }, h('strong', null, 'Pinned'), h('span', null, 'Notes are optional; ↑ ↓ sets the order')),
+        list));
+    const copyRich = h('button', { class: 'primary', onclick: async () => {
+      const md = reportMarkdown();
+      const ok = await api.clipboardWrite({ text: md, html: richHtml($('#inc-rep-doc')) });
+      toast(ok === false ? 'Copying was blocked by the browser.' : 'Copied with formatting. Paste into Teams, Outlook or Word.', 4500);
+    } }, 'Copy for Teams / Outlook');
+    const copyMd = h('button', { onclick: async () => { const ok = await api.clipboardWrite({ text: reportMarkdown() }); toast(ok === false ? 'Copying was blocked by the browser.' : 'Copied as Markdown (for Jira, GitHub, a wiki).', 3500); } }, 'Copy Markdown');
+    const asTab = h('button', { onclick: () => {
+      const t = newTab({ name: 'incident-report.md', content: reportMarkdown(), lang: 'markdown' });
+      activate(t);
+      setPreview(true);
+      toast('The report is open as a Markdown tab, with its preview. The incident is still there.', 8000, { label: 'Back to the incident', run: reopenIncident });
+    }, title: 'Open the report as a Markdown tab to edit it further' }, 'Open as a tab');
+    const main = h('div', { class: 'inc-rep-main' },
+      h('div', { class: 'inc-rep-tools' }, copyRich, copyMd, asTab, h('span', { class: 'hint' }, 'Secrets are masked in everything you copy.')),
+      h('div', { class: 'inc-rq-card inc-rep-paper' }, h('div', { id: 'inc-rep-doc', class: 'md' })));
+    return h('div', { class: 'inc-body inc-rep-body' }, side, main);
+  }
+  function renderReportPreview() {
+    const doc = $('#inc-rep-doc');
+    if (!doc || !incident) return;
+    doc.replaceChildren(Markdown.render(reportMarkdown(), document));
   }
 
   async function copyIncidentFindings() {
@@ -4844,7 +5002,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });

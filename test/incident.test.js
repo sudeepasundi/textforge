@@ -113,6 +113,31 @@ test('Slow and fine requests are told apart; a single line is "appears once"', (
   assert.ok(/appears once, in api-gateway/.test(once.summary), once.summary);
 });
 
+// ---- 0.18.0: the report ----
+test('Report: title, time span, summary, pinned findings with evidence and notes, requests as a table', () => {
+  const r = inc();
+  const quiet = r.findings.find((f) => f.kind === 'quiet');
+  const md = L.incidentReport({
+    title: 'Checkout failures', summary: 'Bank gateway slowed down after the 10:14 deploy.', from: r.min, to: r.max, services: r.services.map((s) => s.name),
+    pins: [
+      { type: 'finding', kind: quiet.kind, title: quiet.title, detail: quiet.detail, when: '10:16:41 to 10:17:29', note: 'Thread pool exhausted.', evidence: [{ file: 'payment-service.log', line: 18, text: 'HikariPool-1 - Thread starvation' }] },
+      { type: 'request', id: 'c3e09f1a7b264d58', state: 'failed', status: 502, summary: 'POST /api/orders went through …', note: '', steps: [{ service: 'api-gateway', label: 'POST /api/orders', took: '1.56 s', result: 'warning' }, { service: 'payment-service', label: 'a | b', took: '1.51 s', result: 'error' }] },
+    ],
+  });
+  assert.ok(md.startsWith('# Checkout failures\n'), md.slice(0, 40));
+  assert.ok(/\*\*When:\*\* 2026-11-02 10:15:00 to 10:18:12 \(3\.2 min\) · \*\*Logs:\*\* api-gateway, order-service, payment-service, inventory-service/.test(md), md.slice(0, 200));
+  assert.ok(/## What happened\n\nBank gateway slowed down/.test(md));
+  assert.ok(/### 1\. payment-service went quiet for 47\.6 s\n\nService went quiet · Nothing logged/.test(md));
+  assert.ok(/Thread pool exhausted\.\n\n```\nHikariPool-1 - Thread starvation\n```\n\n_payment-service\.log, line 18_/.test(md));
+  assert.ok(/### c3e09f1a7b264d58 · failed · 502/.test(md));
+  assert.ok(/\| payment-service \| a \\\| b \| 1\.51 s \| error \|/.test(md), 'pipes in cells are escaped');
+});
+
+test('Report with nothing pinned says so', () => {
+  const md = L.incidentReport({ title: '', summary: '', from: null, to: null, services: [], pins: [] });
+  assert.ok(/^# Incident\n/.test(md) && /_Nothing pinned yet\._/.test(md), md);
+});
+
 test('Big incidents stay quick (4 logs x 50k entries)', () => {
   const big = SAMPLES.map((n, k) => {
     const lines = [];

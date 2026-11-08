@@ -1,5 +1,5 @@
-/* 0.16.0-0.17.0: the incident view - several logs on one clock, findings, time window, reader, jump to a line and back,
-   and following one request across the logs (waterfall). Usage: node test/incident.e2e.js [selfhost URL] */
+/* 0.16.0-0.18.0: the incident view - several logs on one clock, findings, time window, reader, jump to a line and back,
+   following one request (waterfall), pins and the report. Usage: node test/incident.e2e.js [selfhost URL] */
 const path = require('path');
 let playwright;
 try { playwright = require('playwright'); } catch { playwright = require(path.join(process.env.HOME || '', '.npm-global/lib/node_modules/playwright')); }
@@ -155,6 +155,59 @@ const ok = (name, pass, detail) => results.push({ name, pass: !!pass, detail });
   r = await page.evaluate(() => ({ mode: __tf.incident.mode, title: document.querySelector('#incident .inc-r-title').textContent, rows: document.querySelectorAll('#incident .inc-row').length, win: !!__tf.incident.win }));
   ok('"Show on the timeline" goes back with that request\'s entries and time window', r.mode === 'timeline' && r.title === 'Request 7a6b5c4d' && r.rows === 4 && r.win, JSON.stringify(r));
 
+  // ---- 0.18.0: pins and the report ----
+  await page.click('#incident .inc-f-wrap >> nth=0 >> .inc-pin');
+  await page.click('#incident .inc-f.k-quiet >> xpath=.. >> .inc-pin');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => ({ count: document.querySelector('#incident .inc-pin-count').textContent, on: document.querySelectorAll('#incident .inc-pin.on').length, list: document.querySelector('#incident .inc-flist').scrollTop }));
+  ok('The pin on a finding adds it to the report (count on the Report tab), without rebuilding the list', r.count === '2' && r.on === 2, JSON.stringify(r));
+  await page.click('#incident .inc-f-wrap >> nth=0 >> .inc-pin');
+  await page.waitForTimeout(100);
+  r = await page.evaluate(() => ({ count: document.querySelector('#incident .inc-pin-count').textContent, on: document.querySelectorAll('#incident .inc-pin.on').length }));
+  ok('Clicking the pin again unpins', r.count === '1' && r.on === 1, JSON.stringify(r));
+  await page.click('#incident .inc-f-wrap >> nth=0 >> .inc-pin');
+  await page.evaluate(() => __tf.followRequest('c3e09f1a7b264d58'));
+  await page.waitForTimeout(150);
+  await page.click('#incident .inc-pin-req');
+  await page.waitForTimeout(100);
+  r = await page.evaluate(() => ({ btn: document.querySelector('#incident .inc-pin-req').textContent, count: document.querySelector('#incident .inc-pin-count').textContent }));
+  ok('"Pin to report" on a request pins it', r.btn === 'Pinned to the report ✓' && r.count === '3', JSON.stringify(r));
+  await page.click('#incident .inc-modes button:has-text("Report")');
+  await page.waitForTimeout(250);
+  await page.fill('#incident .inc-rep-form .field input', 'Checkout outage');
+  await page.fill('#incident .inc-rep-form .field textarea', 'Bank gateway stopped answering.');
+  await page.fill('#incident .inc-pin-item >> nth=1 >> textarea', 'Pool exhausted.');
+  await page.waitForTimeout(350);
+  r = await page.evaluate(() => ({
+    items: [...document.querySelectorAll('#incident .inc-pin-item .inc-pin-title')].map((x) => x.textContent),
+    heads: [...document.querySelectorAll('#inc-rep-doc h1, #inc-rep-doc h2, #inc-rep-doc h3')].map((x) => x.textContent),
+    note: /Pool exhausted\./.test(document.getElementById('inc-rep-doc').textContent),
+    table: !!document.querySelector('#inc-rep-doc table'),
+    secrets: /hunter2|eyJhbGci/.test(document.getElementById('inc-rep-doc').textContent),
+  }));
+  ok('The Report tab lists the pins in order and previews the report as you type', r.items.length === 3 && r.heads[0] === 'Checkout outage' && r.heads.includes('What happened') && r.note && r.table, JSON.stringify(r).slice(0, 300));
+  ok('The report masks secrets', !r.secrets, String(r.secrets));
+  await page.click('#incident .inc-pin-item >> nth=2 >> button[aria-label="Move up"]');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => [...document.querySelectorAll('#incident .inc-pin-item .inc-tag')].map((x) => x.textContent));
+  ok('↑ / ↓ change the order', r[1] === 'request', JSON.stringify(r));
+  await page.evaluate(() => { window.__copied = null; window.api.clipboardWrite = async (x) => { window.__copied = x; return true; }; });
+  await page.click('#incident button:has-text("Copy for Teams / Outlook")');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => ({ text: (window.__copied || {}).text || '', html: (window.__copied || {}).html || '' }));
+  ok('Copy for Teams / Outlook puts formatted HTML and the Markdown on the clipboard', /^# Checkout outage/.test(r.text) && /<h1[^>]*>Checkout outage<\/h1>/.test(r.html) && /border-collapse/.test(r.html) && !/hunter2/.test(r.html), r.html.slice(0, 120));
+  await page.click('#incident button:has-text("Open as a tab")');
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => ({ tab: __tf.active.name, lang: __tf.active.model.getLanguageId(), first: __tf.active.model.getLineContent(1), preview: !!__tf.active.preview, back: (document.querySelector('#toast .toast-action') || {}).textContent }));
+  ok('"Open as a tab" opens the report as Markdown with the preview, and the incident waits', r.tab === 'incident-report.md' && r.lang === 'markdown' && r.first === '# Checkout outage' && r.preview && r.back === 'Back to the incident', JSON.stringify(r));
+  await page.evaluate(() => __tf.setPreview(false));
+  await page.keyboard.press('Alt+i');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ mode: __tf.incident.mode, pins: __tf.incident.pins.length, title: __tf.incident.report.title }));
+  ok('Coming back keeps the report (pins, title, notes)', r.mode === 'report' && r.pins === 3 && r.title === 'Checkout outage', JSON.stringify(r));
+  await page.evaluate(() => __tf.setIncidentMode('timeline'));
+  await page.waitForTimeout(150);
+
   // appearance
   r = await page.evaluate(() => {
     const main = document.querySelector('#incident .inc-main').getBoundingClientRect();
@@ -186,8 +239,18 @@ const ok = (name, pass, detail) => results.push({ name, pass: !!pass, detail });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.click('#incident button[aria-label="Close the incident"]');
   await page.waitForTimeout(200);
-  r = await page.evaluate(() => ({ view: !!document.getElementById('incident'), state: __tf.incident, signal: getComputedStyle(document.getElementById('signal')).display }));
-  ok('Close removes it and brings the timeline back', !r.view && !r.state && r.signal !== 'none', JSON.stringify(r));
+  r = await page.evaluate(() => ({ modal: !document.getElementById('modal').hidden, text: document.getElementById('modal-box').textContent }));
+  ok('Closing with pinned items asks first', r.modal && /3 pinned items/.test(r.text), r.text.slice(0, 120));
+  await page.click('#modal-box button:has-text("Keep it open")');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => !!document.getElementById('incident'));
+  ok('"Keep it open" keeps it', r, String(r));
+  await page.click('#incident button[aria-label="Close the incident"]');
+  await page.waitForTimeout(150);
+  await page.click('#modal-box button.primary');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { __tf.activate(__tf.tabs.find((t) => t.name === 'api-gateway.log')); return { view: !!document.getElementById('incident'), state: __tf.incident, open: document.body.classList.contains('incident-open'), signal: getComputedStyle(document.getElementById('signal')).display }; });
+  ok('Close removes it and brings the timeline back', !r.view && !r.state && !r.open && r.signal !== 'none', JSON.stringify(r));
 
   ok('No errors', errors.length === 0, errors.join(' | ') || 'none');
   let pass = 0;
