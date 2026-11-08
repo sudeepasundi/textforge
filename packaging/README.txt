@@ -294,3 +294,15 @@ FOLLOW ONE REQUEST (0.17.0)
   it in its log. "Show on the timeline" returns with that request's entries.
   From the Timeline, "Follow request" (above the entries) and "Request ›" on each entry
   jump straight to it.
+
+PIN WHAT MATTERS, SHARE THE REPORT (0.18.0)
+  In the incident view, each finding has a pin (top right of the card) and each request
+  has "Pin to report". The Report tab at the top (with the number pinned) collects them:
+  give the report a title, write a few lines under "What happened", add a note to any
+  pinned item and put them in order with the arrows. The preview on the right updates as
+  you type.
+  Copy for Teams / Outlook pastes it with headings, tables and code blocks intact; Copy
+  Markdown is for Jira, GitHub or a wiki; Open as a tab opens it as a Markdown tab to keep
+  editing. Each finding brings a few evidence lines with their file and line number.
+  Secrets are masked in everything you copy. Closing the incident with pinned items asks
+  first; switching tabs and coming back (Alt+I) keeps the report.

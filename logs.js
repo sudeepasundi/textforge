@@ -1235,7 +1235,52 @@
     return parts.join(' ');
   }
 
+  // ---------------- incident report (0.18.0) ----------------
+  // Markdown for Teams / Outlook / a ticket, from what the person pinned in the incident view. Pure: the
+  // caller resolves each pin (title, detail, evidence lines, note) and masks secrets in the result.
+  const KIND_LABEL = { together: 'Errors in several services', error: 'Error', quiet: 'Service went quiet', slow: 'Slow calls' };
+  const fence = (lines) => { const body = lines.join('\n'); const ticks = /```/.test(body) ? '~~~~' : '```'; return ticks + '\n' + body + '\n' + ticks; };
+  const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ');
+  function incidentReport({ title, summary, from, to, services, pins }) {
+    const out = [];
+    out.push('# ' + (title || 'Incident').trim(), '');
+    const when = from != null ? formatTs(from, true) + ' to ' + formatTs(to) + ' (' + formatDuration(Math.max(0, to - from)) + ')' : '';
+    out.push([when ? '**When:** ' + when : '', services && services.length ? '**Logs:** ' + services.join(', ') : ''].filter(Boolean).join(' · '), '');
+    if (summary && summary.trim()) out.push('## What happened', '', summary.trim(), '');
+    const findings = pins.filter((p) => p.type === 'finding');
+    const reqs = pins.filter((p) => p.type === 'request');
+    if (findings.length) {
+      out.push('## Findings', '');
+      findings.forEach((p, i) => {
+        out.push('### ' + (i + 1) + '. ' + p.title, '');
+        out.push([KIND_LABEL[p.kind] || p.kind, p.detail, p.when].filter(Boolean).join(' · '), '');
+        if (p.note && p.note.trim()) out.push(p.note.trim(), '');
+        if (p.evidence && p.evidence.length) {
+          out.push(fence(p.evidence.map((ev) => ev.text)), '');
+          out.push('_' + [...new Set(p.evidence.map((ev) => ev.file))].map((f) => f + ', line' + (p.evidence.filter((ev) => ev.file === f).length > 1 ? 's ' : ' ') + p.evidence.filter((ev) => ev.file === f).map((ev) => ev.line).join(', ')).join('; ') + '_', '');
+        }
+      });
+    }
+    if (reqs.length) {
+      out.push('## Requests', '');
+      for (const p of reqs) {
+        out.push('### ' + p.id + ' · ' + p.state + (p.status ? ' · ' + p.status : ''), '');
+        if (p.summary) out.push(p.summary, '');
+        if (p.steps && p.steps.length) {
+          out.push('| Service | Step | Took | Result |', '| --- | --- | --: | --- |');
+          for (const s of p.steps) out.push('| ' + [cell(s.service), cell(s.label || ''), cell(s.took), cell(s.result)].join(' | ') + ' |');
+          out.push('');
+        }
+        if (p.note && p.note.trim()) out.push(p.note.trim(), '');
+      }
+    }
+    if (!findings.length && !reqs.length) out.push('_Nothing pinned yet._', '');
+    out.push('_Made with TextForge from ' + (services ? services.length : 0) + ' log' + (services && services.length === 1 ? '' : 's') + '. Secrets were masked._');
+    return out.join('\n').replace(/\n{3,}/g, '\n\n') + '\n';
+  }
+
   return {
+    incidentReport,
     requests, describeRequest,
     incident, incidentBuckets, serviceName, durationMs,
     LEVEL_CHIPS, FORMAT_LABELS, PRESETS, autoTables, EXC_RE, FRAME_RE, STACK_LINE_RE,

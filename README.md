@@ -18,6 +18,7 @@ logs automatically.
   findings spotted for you: errors that spread across services, repeated errors, a service that went quiet, slow
   calls. Drag a time window to read every log's entries in order; click one to jump to that line. Switch to
   Requests to follow one trace ID across services as a waterfall, with a plain-language summary of what broke.
+  Pin findings and requests, add notes, and copy the incident report for Teams or Outlook (secrets masked).
 - **One query bar (Ctrl+K).** Type `level:warn+ logger:Payment took>1000 after:10:15 -healthcheck` and each
   part becomes a chip; drag on the timeline for a time-range chip. Start with `>` to run a command.
 - **Auto tables.** TextForge learns the message patterns in a log and builds one table per pattern. Whatever
