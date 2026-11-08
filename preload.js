@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   os: process.platform,
   frameless: true,
+  version: ipcRenderer.sendSync('app:version'),
   setTitleBar: (colors) => ipcRenderer.invoke('win:titlebar', colors),
   startupFiles: () => ipcRenderer.invoke('startup-files'),
   openDialog: () => ipcRenderer.invoke('dialog:open'),

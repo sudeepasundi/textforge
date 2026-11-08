@@ -1,7 +1,7 @@
 # TextForge: project context for Claude Code
 
 This file is the hand-off for continuing work on TextForge. Read it fully before changing anything.
-Current version: **0.15.0** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
+Current version: **0.15.1** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
 
 **Direction (agreed 2026-11-07):** move to Tauri 2 + a Rust log engine (also WASM on the web) + Svelte/TypeScript,
 one phase per release; 0.13.0 added the Tauri preview. The UI follows design "D · Focus with tools" from the
@@ -159,7 +159,7 @@ node test/layout.e2e.js        # 16  sidebar, density, split basics, timeline dr
 node test/workspace.e2e.js     # 22  panel resize, tab rename/reorder, multi-pane split, shared filters/search
 node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
 node test/files.e2e.js         # 19  Open files list
-node test/fullscreen.e2e.js    # 34  resize and full screen everywhere, including appearance checks
+node test/fullscreen.e2e.js    # 38  resize and full screen everywhere, including appearance checks
 node test/querybar.e2e.js      # 39  design D: query bar, time chip, count filters, result tabs, patterns, selection toolbar, badge
 xvfb-run -a node test/ui-desktop.e2e.js   # 9  Electron: title bar, Copilot resize, full-screen window restore
 ```
@@ -218,6 +218,13 @@ GitHub runs occasionally sit in "queued" for a long time; re-dispatching usually
   dialogs, palette, menus and the find box get Esc first. The desktop main process restores window
   bounds on `leave-html-full-screen`.
 - **Electron `titleBarOverlay`** height follows density (40 / 32 px) via `win:titlebar` IPC.
+- **Web updates (0.15.1):** the service worker used to be cache-first, so an open tab (or one reload) kept the
+  old version for days; the owner reported 0.12 bugs after 0.15.0 was live. Now app files are network-first
+  (cache only when offline), Monaco and fonts stay cache-first, the page calls `reg.update()` on
+  visibilitychange and hourly, and `controllerchange` raises a "new version ready / Reload" toast. When the
+  owner reports a bug, first check the version they run (help dialog, or hover the logo).
+- **Copilot button:** it stays in the bottom-right corner of `#main`; don't move it with the results panel
+  (it ended up over the editor text when the panel was tall).
 - **Copilot sign-in** persists in partition `persist:copilot`. The pane auto-loads once
   `settings.cpStarted` is set; "Sign out of Copilot" clears that partition.
 

@@ -157,6 +157,7 @@ if (app.hasSingleInstanceLock()) {
 app.on('window-all-closed', () => app.quit());
 
 // ---------- IPC ----------
+ipcMain.on('app:version', (e) => { e.returnValue = app.getVersion(); });
 ipcMain.handle('startup-files', () => fileArgs(process.argv).map(readFileSafe));
 
 ipcMain.handle('dialog:open', async () => {

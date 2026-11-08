@@ -259,3 +259,14 @@ PATTERNS FOUND, TOOLBAR ON SELECTED TEXT, COPILOT BADGE (0.15.0)
   Show only entries with this (for a short one-line selection in a log) and Ask Copilot.
   Turn it off or on again from the command palette ("Hide the toolbar on selected text").
   The Copilot button shows a red number: how many errors the current log has.
+
+UPDATES REACH OPEN TABS, COPILOT BUTTON STAYS PUT (0.15.1)
+  Web version: a tab that stays open now finds new versions by itself (when you come
+  back to it, and every hour) and shows "A new version of TextForge is ready" with a
+  Reload button; your tabs are kept. A plain reload also always gets the newest version
+  now (before, the browser could keep showing an old copy until it was reloaded twice).
+  It still works offline.
+  The Copilot button stays in the bottom-right corner instead of climbing up with the
+  results panel, where it could end up over the editor text.
+  Copilot in full screen (browser version) keeps its introduction at a readable width.
+  Help (?) shows which version you are running; so does hovering the TextForge logo.

@@ -1,4 +1,4 @@
-/* 0.12.0: resizing and full screen across the app - the preview (drag, Alt+Shift+P, double-click,
+/* 0.12.0-0.15.1: resizing and full screen across the app - the preview (drag, Alt+Shift+P, double-click,
    Esc), the comparison, the results panel, Copilot, the sidebar, split panes, and phones.
    Usage: node test/fullscreen.e2e.js [selfhost URL] */
 const path = require('path');
@@ -200,6 +200,35 @@ const fills = (r, w) => r && r.x === 0 && r.y === 0 && r.w === w.w && r.h === w.
   ok('Comparison: no empty strip between the two sides', r.gap !== null && r.gap <= 8, JSON.stringify(r));
   await page.evaluate(() => __tf.closeCompare && __tf.closeCompare());
   await page.evaluate(() => { if (document.getElementById('diff')) document.querySelector('#diff button[title="Close comparison"]').click(); });
+
+  // ---------- 0.15.1: Copilot button, Copilot intro in full screen, resizing while full screen ----------
+  await page.evaluate(() => { __tf.activate(__tf.tabs.find((x) => x.name === 'notes.md')); __tf.setPreview(false); __tf.autoTables(); });
+  await page.waitForTimeout(500);
+  await page.evaluate(() => { const p = document.getElementById('panel'); p.style.height = Math.round(innerHeight * 0.6) + 'px'; window.dispatchEvent(new Event('resize')); });
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => { const f = document.getElementById('cp-fab').getBoundingClientRect(), m = document.getElementById('main').getBoundingClientRect(), p = document.getElementById('panel').getBoundingClientRect(); return { bottomGap: Math.round(m.bottom - f.bottom), rightGap: Math.round(m.right - f.right), fabTop: Math.round(f.top), panelTop: Math.round(p.top) }; });
+  ok('The Copilot button stays in the bottom-right corner when the results panel is tall (it no longer climbs over the editor)', r.bottomGap <= 30 && r.rightGap <= 30 && r.fabTop > r.panelTop, JSON.stringify(r));
+  await page.evaluate(() => { document.querySelector('#panel-close').click(); __tf.openCopilot({ toggle: false }); });
+  await page.waitForTimeout(300);
+  await page.click('#cp-full');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { const i = document.querySelector('#cp-host .cp-intro'); if (!i) return null; const b = i.getBoundingClientRect(); return { w: Math.round(b.width), left: Math.round(b.left), right: Math.round(innerWidth - b.right), vw: innerWidth }; });
+  ok('Copilot in full screen: the introduction keeps a readable width, centred', r && r.w <= 780 && Math.abs(r.left - r.right) <= 4, JSON.stringify(r));
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => __tf.closeCopilot());
+  await page.evaluate(() => { __tf.activate(__tf.tabs.find((x) => x.name === 'notes.md')); __tf.setPreview(true); });
+  await page.waitForTimeout(200);
+  await page.click('#pv-full');
+  await page.setViewportSize({ width: 1700, height: 1000 }); // the browser grows the window after full screen starts
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => { const p = document.getElementById('preview').getBoundingClientRect(), b = document.getElementById('preview-body'); return { w: Math.round(p.width), h: Math.round(p.height), vw: innerWidth, vh: innerHeight, scrollbarAtEdge: Math.round(b.getBoundingClientRect().right) === innerWidth }; });
+  ok('Full screen follows the window when it changes size (preview fills it, scrollbar at the edge)', r.w === r.vw && r.h === r.vh && r.scrollbarAtEdge, JSON.stringify(r));
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { document.querySelector('[data-act="help"]').click(); return new Promise((res) => setTimeout(() => res((document.querySelector('#modal-box .tf-version') || {}).textContent || ''), 150)); });
+  ok('The help dialog says which version is running', /^TextForge \d+\.\d+\.\d+/.test(r), r);
+  await page.keyboard.press('Escape');
 
   // ---------- phone ----------
   await page.setViewportSize({ width: 390, height: 844 });

@@ -100,13 +100,20 @@ if (shots) fs.mkdirSync(shots, { recursive: true });
     const closed = await E(() => getComputedStyle(document.getElementById('cp-fab')).opacity);
     return ok(open === '0' && closed === '1', `opacity open ${open}, closed ${closed}`);
   });
-  await check('Overlaps', 'Copilot button clears the status bar and the bottom panel', async () => {
+  // 0.15.1: the button no longer climbs above the results panel (it ended up over the editor text when the panel
+  // was tall). It stays in the bottom-right corner, clear of the status bar, the panel's toolbar and its scrollbar.
+  await check('Overlaps', 'Copilot button stays in its corner, clear of the status bar and the panel controls', async () => {
     const a = await E(() => { const f = document.getElementById('cp-fab').getBoundingClientRect(); const s = document.getElementById('statusbar').getBoundingClientRect(); return f.bottom <= s.top; });
     await E(() => __tf.runCommand('Find in all open tabs'));
     await page.waitForTimeout(200);
-    const b = await E(() => { const f = document.getElementById('cp-fab').getBoundingClientRect(); const p = document.getElementById('panel').getBoundingClientRect(); return f.bottom <= p.top; });
+    const b = await E(() => {
+      const f = document.getElementById('cp-fab').getBoundingClientRect(), head = document.getElementById('panel-head').getBoundingClientRect(), body = document.getElementById('panel-body');
+      const br = body.getBoundingClientRect(); const scrollbarLeft = br.left + body.clientWidth;
+      const main = document.getElementById('main').getBoundingClientRect();
+      return { belowHead: f.top >= head.bottom, clearOfScrollbar: f.right <= scrollbarLeft, corner: main.bottom - f.bottom <= 30 && main.right - f.right <= 30 };
+    });
     await reset();
-    return ok(a && b, `above status bar ${a}, above bottom panel ${b}`);
+    return ok(a && b.belowHead && b.clearOfScrollbar && b.corner, `above status bar ${a}, ${JSON.stringify(b)}`);
   });
   await check('Overlaps', 'Welcome screen sits above the minimap and is fully clickable', async () => {
     await E(() => { const t = __tf.newTab({}); __tf.activate(t); });

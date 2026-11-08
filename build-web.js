@@ -12,6 +12,7 @@ const ROOT = __dirname;
 const OUT = path.join(ROOT, 'web-dist');
 const MONACO_SRC = path.join(ROOT, 'node_modules/monaco-editor/min/vs');
 const MONACO_VERSION = require('monaco-editor/package.json').version;
+const APP_VERSION = require('./package.json').version;
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
 function copyDir(src, dst, skip = () => false) {
@@ -87,11 +88,25 @@ const shHtml = `<!DOCTYPE html>
 </head>
 <body>
 ${bodyMarkup}
-  <script>window.TF_WEB = { target: 'selfhost', monacoBase: 'monaco', canDownload: true, sample: ${JSON.stringify(sample)} };</script>
+  <script>window.TF_WEB = { target: 'selfhost', version: '${APP_VERSION}', monacoBase: 'monaco', canDownload: true, sample: ${JSON.stringify(sample)} };</script>
   <script src="monaco/vs/loader.js"></script>
 ${scripts.map((s) => `  <script src="${s}"></script>`).join('\n')}
   <script>
-    if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(function () {});
+    // Offline support. A new version takes over as soon as it is downloaded; the page then offers a reload
+    // (tabs are kept). Updates are looked for when the tab comes back into view and every hour, so a tab
+    // that stays open for days still gets new versions.
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      var hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.register('sw.js').then(function (reg) {
+        var check = function () { reg.update().catch(function () {}); };
+        document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') check(); });
+        setInterval(check, 60 * 60 * 1000);
+      }).catch(function () {});
+      navigator.serviceWorker.addEventListener('controllerchange', function () {
+        if (hadController) window.dispatchEvent(new CustomEvent('tf-update'));
+        hadController = true;
+      });
+    }
   </script>
 </body>
 </html>
@@ -112,13 +127,18 @@ self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
 });
+// The app itself (page, scripts, styles) comes from the network first, so a reload always shows the
+// latest version; the cache is the fallback when offline. Monaco is large and versioned: cache first.
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
-  e.respondWith(caches.match(req, { ignoreSearch: true }).then((hit) => hit || fetch(req).then((res) => {
-    if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
-    return res;
-  })));
+  const url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== location.origin) return;
+  const keep = (res) => { if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); } return res; };
+  if (url.pathname.includes('/monaco/') || url.pathname.includes('/fonts/')) {
+    e.respondWith(caches.match(req, { ignoreSearch: true }).then((hit) => hit || fetch(req).then(keep)));
+    return;
+  }
+  e.respondWith(fetch(req, { cache: 'no-cache' }).then(keep).catch(() => caches.match(req, { ignoreSearch: true }).then((hit) => hit || Response.error())));
 });
 `);
 
@@ -175,7 +195,7 @@ fs.writeFileSync(path.join(DK, 'index.html'), `<!DOCTYPE html>
 </head>
 <body>
 ${bodyMarkup}
-  <script>window.TF_WEB = { target: 'tauri', monacoBase: 'monaco' };</script>
+  <script>window.TF_WEB = { target: 'tauri', version: '${APP_VERSION}', monacoBase: 'monaco' };</script>
   <script src="monaco/vs/loader.js"></script>
 ${desktopScripts.map((s) => `  <script src="${s}"></script>`).join('\n')}
 </body>
@@ -200,7 +220,7 @@ ${monacoCss}
 ${pageCss}
 </style>
 ${bodyMarkup}
-<script>window.TF_WEB = { target: 'artifact', monacoBase: '${cdn}', inlineMonacoCss: true, canDownload: false, sample: ${JSON.stringify(sample).replace(/<\//g, '<\\/')} };</script>
+<script>window.TF_WEB = { target: 'artifact', version: '${APP_VERSION}', monacoBase: '${cdn}', inlineMonacoCss: true, canDownload: false, sample: ${JSON.stringify(sample).replace(/<\//g, '<\\/')} };</script>
 <script src="${cdn}/vs/loader.js"></script>
 ${scripts.map((s) => `<script>\n${inline(s)}\n</script>`).join('\n')}
 `;
