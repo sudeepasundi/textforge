@@ -1320,13 +1320,27 @@
     const st = incident;
     const res = st.res;
     const fsBtn = h('button', { class: 'icon-btn small fs-btn', title: 'Full screen. Esc to exit', 'data-title': 'Full screen. Esc to exit', html: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>', onclick: () => toggleFullscreen($('#incident'), { label: 'The incident' }) });
+    const reqs = incidentRequests();
+    const failedN = reqs.filter((r) => r.failed).length;
+    const inRequests = st.mode === 'requests';
+    const modes = h('div', { class: 'inc-modes', role: 'tablist', 'aria-label': 'Incident view' },
+      h('button', { role: 'tab', class: inRequests ? '' : 'on', 'aria-selected': String(!inRequests), onclick: () => setIncidentMode('timeline'), title: 'All logs on one clock, with findings' }, 'Timeline'),
+      h('button', { role: 'tab', class: inRequests ? 'on' : '', 'aria-selected': String(inRequests), onclick: () => setIncidentMode('requests'), title: 'Follow one request across the logs' }, 'Requests',
+        h('span', { class: 'inc-mode-n' + (failedN ? ' bad' : '') }, failedN ? failedN + ' failed' : String(reqs.length))));
     const head = h('div', { class: 'pv-head inc-head' },
       h('strong', null, 'Incident'), h('span', { class: 'inc-sub' }, res.services.length + ' logs · ' + Logs.formatTs(res.min) + ' to ' + Logs.formatTs(res.max) + ' · ' + Logs.formatDuration(res.max - res.min)),
-      h('span', { class: 'grow' }),
+      h('span', { class: 'grow' }), modes, h('span', { class: 'grow' }),
       h('button', { onclick: copyIncidentFindings, title: 'Copy the findings as text, with secrets masked' }, 'Copy findings'),
       fsBtn,
       h('button', { class: 'icon-btn small', title: 'Close the incident (your tabs stay open)', 'aria-label': 'Close the incident', html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>', onclick: closeIncident }));
     head.addEventListener('dblclick', (e) => { if (!e.target.closest('button')) toggleFullscreen($('#incident'), { label: 'The incident' }); });
+    if (inRequests) {
+      $('#work').append(h('div', { id: 'incident', class: 'inc-requests-mode' }, head, buildRequestsBody()));
+      document.body.classList.add('incident-open');
+      updateWelcome();
+      drawRequestDetail();
+      return;
+    }
 
     // findings
     const fList = h('div', { class: 'inc-flist', role: 'list' });
@@ -1369,7 +1383,7 @@
       h('p', { class: 'inc-hint' }, 'Drag across the lanes to look at a time window; double-click to clear it. Click a dot for its entries.'));
 
     // reader
-    const reader = h('aside', { class: 'inc-reader', 'aria-label': 'Entries' }, h('div', { class: 'inc-col-head' }, h('strong', { class: 'inc-r-title' }, 'Entries'), h('span', { class: 'inc-r-sub' })), h('div', { class: 'inc-rlist' }));
+    const reader = h('aside', { class: 'inc-reader', 'aria-label': 'Entries' }, h('div', { class: 'inc-col-head' }, h('strong', { class: 'inc-r-title' }, 'Entries'), h('span', { class: 'inc-r-sub' }), h('div', { class: 'inc-r-follow' })), h('div', { class: 'inc-rlist' }));
     const host = h('div', { id: 'incident' }, head, h('div', { class: 'inc-body' }, findings, main, reader));
     $('#work').append(host);
     document.body.classList.add('incident-open');
@@ -1486,6 +1500,11 @@
     incident.reader = { title, sub, refs };
     host.querySelector('.inc-r-title').textContent = title;
     host.querySelector('.inc-r-sub').textContent = sub || '';
+    // requests with more than one entry can be followed from here
+    const reqById = new Map(incidentRequests().filter((x) => x.hits > 1).map((x) => [x.id, x]));
+    const ids = [...new Set(refs.map((r) => { const e = incident.res.services[r.s].entries[r.e]; return e && e.traceId; }).filter((id) => id && reqById.has(id)))];
+    const follow = host.querySelector('.inc-r-follow');
+    follow.replaceChildren(...(ids.length === 1 ? [h('button', { class: 'inc-follow-btn', onclick: () => followRequest(ids[0]) }, 'Follow request ' + ids[0].slice(0, 8) + ' ›')] : []));
     const list = host.querySelector('.inc-rlist');
     list.replaceChildren();
     const svcs = incident.res.services;
@@ -1495,13 +1514,15 @@
       const first = (s.lines[e.start] || '');
       const msg = e.message || first;
       const lvl = (e.level || '').toUpperCase();
-      list.append(h('button', { class: 'inc-row lv-' + (lvl || 'none').toLowerCase(), title: 'Open ' + s.file + ' at line ' + (e.start + 1), onclick: () => openIncidentLine(incident.tabs[r.s], e.start + 1) },
+      const rq = e.traceId ? reqById.get(e.traceId) : null;
+      const row = h('button', { class: 'inc-row lv-' + (lvl || 'none').toLowerCase() + (rq ? ' has-req' : ''), title: 'Open ' + s.file + ' at line ' + (e.start + 1), onclick: () => openIncidentLine(incident.tabs[r.s], e.start + 1) },
         h('span', { class: 'inc-row-top' },
           h('span', { class: 'inc-row-ts' }, e.ts != null ? Logs.formatTs(e.ts) + '.' + String(Math.round(e.ts % 1000)).padStart(3, '0') : '—'),
           h('span', { class: 'inc-row-svc' }, h('i', { style: 'background:' + LANE_TINTS[r.s % LANE_TINTS.length] }), s.name),
           lvl ? h('span', { class: 'inc-row-lvl' }, lvl) : null,
           h('span', { class: 'inc-row-ln' }, 'line ' + (e.start + 1))),
-        h('span', { class: 'inc-row-msg' }, msg.length > 400 ? msg.slice(0, 399) + '…' : msg)));
+        h('span', { class: 'inc-row-msg' }, msg.length > 400 ? msg.slice(0, 399) + '…' : msg));
+      list.append(rq ? h('div', { class: 'inc-row-wrap' }, row, h('button', { class: 'inc-row-follow', title: 'Follow request ' + rq.id + ' across the logs', onclick: () => followRequest(rq.id) }, 'Request ›')) : row);
     }
     if (!rows.length) list.append(h('p', { class: 'hint inc-empty' }, refs === null ? '' : 'Nothing here. Pick a finding, drag a time window or click a dot.'));
     if (rows.length > READER_MAX) list.append(h('p', { class: 'hint inc-empty' }, 'Showing the first ' + READER_MAX + ' of ' + rows.length.toLocaleString() + '. Narrow the time window to see the rest.'));
@@ -1516,6 +1537,136 @@
     editor.focus();
     toast('Opened ' + tab.name + ' at line ' + line + '.', 8000, { label: 'Back to the incident', run: reopenIncident });
   }
+  // ---------- requests: follow one request across the logs (0.17.0) ----------
+  function incidentRequests() {
+    if (!incident.requests) incident.requests = Logs.requests(incident.res);
+    return incident.requests;
+  }
+  function setIncidentMode(mode) {
+    if (!incident) return;
+    incident.mode = mode;
+    renderIncident();
+  }
+  function followRequest(id) {
+    if (!incident) return;
+    const rq = incidentRequests().find((r) => r.id === id);
+    if (!rq) { toast('That request is not in these logs.'); return; }
+    incident.mode = 'requests';
+    incident.req = Object.assign(incident.req || {}, { filter: 'all', q: '', id, step: null });
+    renderIncident();
+  }
+  function showRequestOnTimeline(rq) {
+    const pad = Math.max(500, (rq.to - rq.from) * 0.2);
+    incident.mode = 'timeline';
+    incident.win = [Math.max(incident.res.min, rq.from - pad), Math.min(incident.res.max, rq.to + pad)];
+    incident.finding = null;
+    incident.reader = { title: 'Request ' + rq.id.slice(0, 8), sub: rq.hits + ' entr' + (rq.hits === 1 ? 'y' : 'ies') + ' in ' + rq.services.length + ' log' + (rq.services.length === 1 ? '' : 's'), refs: rq.steps.flatMap((s) => s.refs) };
+    renderIncident();
+  }
+  const fmtMs = (ms) => (ms < 1000 ? Math.round(ms) + ' ms' : (ms / 1000).toFixed(ms < 10000 ? 2 : 1).replace(/\.?0+$/, '') + ' s');
+  const rqState = (r) => (r.failed ? 'failed' : r.slow ? 'slow' : 'ok');
+
+  function buildRequestsBody() {
+    const st = incident;
+    const all = incidentRequests();
+    if (!st.req) st.req = { filter: all.some((r) => r.failed) ? 'failed' : 'all', q: '', id: null, step: null };
+    const R = st.req;
+    const counts = { failed: all.filter((r) => r.failed).length, slow: all.filter((r) => r.slow).length, all: all.length };
+    const chip = (key, label) => h('button', { class: 'inc-chip' + (R.filter === key ? ' on' : ''), 'aria-pressed': String(R.filter === key), onclick: () => { R.filter = key; R.id = null; drawRequestList(); drawRequestDetail(); } }, label + ' · ' + counts[key]);
+    const search = h('input', { type: 'search', class: 'inc-rq-search', placeholder: 'Trace ID, route or service', 'aria-label': 'Find a request', value: R.q, spellcheck: false,
+      oninput: (e) => { R.q = e.target.value; drawRequestList(); } });
+    const left = h('aside', { class: 'inc-findings inc-rq-side', 'aria-label': 'Requests' },
+      h('div', { class: 'inc-col-head' }, h('strong', null, 'Requests'), h('span', null, all.length + ' in these logs')),
+      h('div', { class: 'inc-rq-tools' }, search, h('div', { class: 'inc-chips' }, chip('failed', 'Failed'), chip('slow', 'Slow'), chip('all', 'All'))),
+      h('div', { class: 'inc-flist inc-rq-list', role: 'listbox', 'aria-label': 'Requests' }));
+    const main = h('div', { class: 'inc-rq-main' },
+      h('section', { class: 'inc-rq-card inc-rq-summary', 'aria-label': 'Summary' }),
+      h('section', { class: 'inc-rq-card inc-wf', 'aria-label': 'Steps' }),
+      h('section', { class: 'inc-rq-card inc-rq-lines', 'aria-label': 'Lines for this step' }));
+    const body = h('div', { class: 'inc-body inc-rq-body' }, left, main);
+    setTimeout(drawRequestList, 0);
+    return body;
+  }
+  function visibleRequests() {
+    const R = incident.req;
+    const q = (R.q || '').toLowerCase();
+    return incidentRequests().filter((r) => (R.filter === 'all' || (R.filter === 'failed' ? r.failed : r.slow)) &&
+      (!q || (r.id + ' ' + (r.route || '') + ' ' + r.services.join(' ')).toLowerCase().includes(q)));
+  }
+  function drawRequestList() {
+    const host = $('#incident .inc-rq-list');
+    if (!host) return;
+    const R = incident.req;
+    const list = visibleRequests();
+    host.replaceChildren();
+    for (const r of list.slice(0, 500)) {
+      host.append(h('button', { class: 'inc-req s-' + rqState(r) + (r.id === R.id ? ' on' : ''), role: 'option', 'aria-selected': String(r.id === R.id),
+        onclick: () => { R.id = r.id; R.step = null; drawRequestList(); drawRequestDetail(); } },
+        h('span', { class: 'inc-req-top' }, h('i', { class: 'inc-req-dot' }), h('span', { class: 'inc-req-id' }, r.id.slice(0, 8)), h('span', { class: 'inc-req-ms' }, fmtMs(r.ms))),
+        h('span', { class: 'inc-req-sub' }, (r.route || 'no route') + ' · ' + r.services.length + ' service' + (r.services.length === 1 ? '' : 's') + (r.status ? ' · ' + r.status : ''))));
+    }
+    if (!list.length) host.append(h('p', { class: 'hint inc-empty' }, 'No request matches.'));
+    $$('#incident .inc-chip').forEach((c) => { const on = c.textContent.toLowerCase().startsWith(R.filter); c.classList.toggle('on', on); c.setAttribute('aria-pressed', String(on)); });
+  }
+  function drawRequestDetail() {
+    const host = $('#incident');
+    if (!host || !incident.req) return;
+    const R = incident.req;
+    const all = incidentRequests();
+    const list = visibleRequests();
+    let rq = all.find((r) => r.id === R.id);
+    if (!rq) { rq = list[0] || all[0]; R.id = rq ? rq.id : null; drawRequestList(); }
+    const sum = host.querySelector('.inc-rq-summary');
+    const wf = host.querySelector('.inc-wf');
+    const lines = host.querySelector('.inc-rq-lines');
+    if (!rq) { sum.replaceChildren(h('p', { class: 'hint' }, 'These logs have no trace IDs, so requests cannot be followed across them.')); wf.replaceChildren(); lines.replaceChildren(); return; }
+    // summary
+    const state = rqState(rq);
+    sum.replaceChildren(
+      h('div', { class: 'inc-rq-head' },
+        h('span', { class: 'inc-rq-id' }, rq.id),
+        h('span', { class: 'inc-rq-state s-' + state }, state === 'failed' ? 'failed' + (rq.status ? ' · ' + rq.status : '') : state === 'slow' ? 'slow' : 'ok' + (rq.status ? ' · ' + rq.status : '')),
+        h('span', { class: 'inc-rq-when' }, (rq.route ? rq.route + ' · ' : '') + Logs.formatTs(rq.from) + ' · ' + fmtMs(rq.ms))),
+      h('p', { class: 'inc-rq-text' }, maskText(rq.summary)),
+      h('div', { class: 'inc-rq-actions' },
+        h('button', { onclick: () => showRequestOnTimeline(rq), title: 'See these entries among everything else that happened at the time' }, 'Show on the timeline'),
+        h('button', { onclick: async () => { const ok = await api.clipboardWrite({ text: 'Request ' + rq.id + '\n' + maskText(rq.summary) }); toast(ok === false ? 'Copying was blocked by the browser.' : 'Copied the summary (secrets masked).', 2500); } }, 'Copy summary')));
+    // waterfall
+    const span = Math.max(1, rq.to - rq.from);
+    const pct = (t) => ((t - rq.from) / span) * 100;
+    if (R.step == null || !rq.steps[R.step]) { const e = rq.steps.findIndex((s) => s.level === 'error'); R.step = e >= 0 ? e : 0; }
+    const axis = h('div', { class: 'inc-wf-axis' }, h('span', { class: 'inc-wf-lblsp' }, 'Step'),
+      h('div', { class: 'inc-wf-scale' }, ...[0, 1, 2, 3, 4].map((i) => h('span', { style: 'left:' + (i * 25) + '%' }, i ? fmtMs(span * i / 4) : '0'))));
+    const rows = rq.steps.map((s, i) => {
+      const left = pct(s.from);
+      const width = Math.max(0.8, pct(s.to) - left);
+      const ticks = s.refs.map((ref) => { const e = incident.res.services[ref.s].entries[ref.e]; return h('i', { class: 'inc-wf-tick', style: 'left:' + pct(e.ts) + '%' }); });
+      return h('button', { class: 'inc-wf-row lv-' + s.level + (i === R.step ? ' on' : ''), 'aria-pressed': String(i === R.step), onclick: () => { R.step = i; drawRequestDetail(); } },
+        h('span', { class: 'inc-wf-lbl' },
+          h('span', { class: 'inc-row-svc' }, h('i', { style: 'background:' + LANE_TINTS[s.s % LANE_TINTS.length] }), s.service),
+          h('span', { class: 'inc-wf-op' }, maskText(s.label))),
+        h('span', { class: 'inc-wf-track' },
+          h('span', { class: 'inc-wf-bar', style: `left:${left}%;width:${width}%` }), ...ticks,
+          // after the bar when there is room; otherwise inside the bar's end
+          h('span', { class: 'inc-wf-dur' + (left + width > 78 ? ' inside' : ''), style: left + width > 78 ? `right:${100 - left - width}%;padding-right:8px` : `left:${left + width}%;padding-left:8px` },
+            fmtMs(s.to - s.from) + (s.level === 'error' ? ' · error' : s.level === 'warn' ? ' · warning' : ''))));
+    });
+    wf.replaceChildren(axis, ...rows);
+    // the lines behind the chosen step
+    const step = rq.steps[R.step];
+    const svc = incident.res.services[step.s];
+    const tab = incident.tabs[step.s];
+    const out = [];
+    for (const ref of step.refs) {
+      const e = svc.entries[ref.e];
+      for (let l = e.start; l <= Math.min(e.end, e.start + 12); l++) out.push({ l, text: svc.lines[l], lvl: (e.level || '').toLowerCase() });
+    }
+    lines.replaceChildren(
+      h('div', { class: 'inc-rq-lhead' }, h('strong', null, 'Lines behind “' + maskText(step.label) + '”'), h('span', null, svc.file + ' · ' + step.refs.length + ' entr' + (step.refs.length === 1 ? 'y' : 'ies'))),
+      h('div', { class: 'inc-rq-code' }, ...out.map((x) => h('button', { class: 'inc-code-line lv-' + (x.lvl || 'none'), title: 'Open ' + svc.file + ' at line ' + (x.l + 1), onclick: () => openIncidentLine(tab, x.l + 1) },
+        h('span', { class: 'inc-code-n' }, String(x.l + 1)), h('span', { class: 'inc-code-t' }, x.text)))));
+  }
+
   async function copyIncidentFindings() {
     const res = incident.res;
     const out = ['Incident: ' + res.services.map((s) => s.name).join(', '), Logs.formatTs(res.min, true) + ' to ' + Logs.formatTs(res.max) + ' (' + Logs.formatDuration(res.max - res.min) + ')', ''];
@@ -4693,7 +4844,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });

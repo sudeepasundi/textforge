@@ -16,7 +16,8 @@ logs automatically.
   repeated errors are grouped with counts.
 - **Investigate logs together (Alt+I).** Open one log per service and see them as lanes on one clock, with
   findings spotted for you: errors that spread across services, repeated errors, a service that went quiet, slow
-  calls. Drag a time window to read every log's entries in order; click one to jump to that line.
+  calls. Drag a time window to read every log's entries in order; click one to jump to that line. Switch to
+  Requests to follow one trace ID across services as a waterfall, with a plain-language summary of what broke.
 - **One query bar (Ctrl+K).** Type `level:warn+ logger:Payment took>1000 after:10:15 -healthcheck` and each
   part becomes a chip; drag on the timeline for a time-range chip. Start with `>` to run a command.
 - **Auto tables.** TextForge learns the message patterns in a log and builds one table per pattern. Whatever
