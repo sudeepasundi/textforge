@@ -24,7 +24,7 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   const errors = []; page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(URL_);
   await page.waitForFunction(() => window.__tf && window.__tf.active && window.__tf.active.an, null, { timeout: 60000 });
-  await page.evaluate(() => __tf.setTheme('slate'));
+  await page.evaluate(() => { __tf.setTheme('slate'); __tf.settings.filtersDocked = true; __tf.setFilter({}); }); // most checks use the pinned filter row; the drop down has its own section
   copyMenu = async (label) => { await page.click('#panel-tools .menu-btn'); await page.click('.menu button:has-text("' + label + '")'); };
   let r;
 
@@ -402,6 +402,104 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   ok('Alt+D opens Compare too', r, String(r));
   await page.keyboard.press('Escape');
   await page.waitForTimeout(150);
+
+  // ---- 0.19.0: hide or remove part of every line (a path, a file name, a prefix) ----
+  await page.evaluate(() => { __tf.clearFilter(); __tf.settings.hideRules = []; __tf.settings.showHidden = false; __tf.refreshHidden(); __tf.activate(__tf.tabs.find((t) => /sample/.test(t.name))); __tf.hideSide && __tf.hideSide(); });
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => [['/opt/app/logs/order-7.log', '/var/log/x/y.log'], ['OrderService.java:112', 'PaymentClient.java:57'], ['traceId=c3e09f1a7b264d58', 'traceId=6f1c2a9be0d34f11'], ['user 4512 ok', 'user 7 ok']]
+    .map(([a, b]) => { const re = new RegExp('^' + __tf.likePattern(a) + '$'); return re.test(a) && re.test(b); }));
+  ok('"Text like this" matches the same shape: paths, file names with line numbers, IDs, numbers', r.every(Boolean), JSON.stringify(r));
+  const before0 = await page.evaluate(() => __tf.active.model.getValue());
+  await page.evaluate(() => { const ed = __tf.editor; const line = ed.getModel().getLineContent(1); const i = line.indexOf('18244'); ed.setSelection(new monaco.Range(1, i + 1, 1, line.indexOf('[', i + 12) + 1)); ed.revealLine(1); ed.focus(); });
+  await page.keyboard.press('Shift+End'); await page.keyboard.press('Shift+Home');
+  await page.evaluate(() => { const ed = __tf.editor; const line = ed.getModel().getLineContent(1); const i = line.indexOf('18244'); ed.setSelection(new monaco.Range(1, i + 1, 1, line.indexOf('[', i + 12) + 1)); });
+  await page.keyboard.press('Shift+ArrowRight'); await page.keyboard.press('Shift+ArrowLeft');
+  await page.waitForTimeout(450);
+  r = await page.evaluate(() => ({ on: document.querySelector('.selbar').classList.contains('on'), sel: __tf.active.model.getValueInRange(__tf.editor.getSelection()) }));
+  ok('Selecting part of a line shows the toolbar with Hide…', r.on && /^18244 --- \[order-service\] $/.test(r.sel) && await page.isVisible('.selbar .sb-btn:has-text("Hide…")'), JSON.stringify(r));
+  await page.click('.selbar .sb-btn:has-text("Hide…")');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => [...document.querySelectorAll('.menu button')].map((b) => b.textContent));
+  ok('Hide… offers hide this text, hide text like this, and remove', r.some((x) => /^Hide "18244 --- \[order-service\] " in every line$/.test(x)) && r.some((x) => /^Hide text like this/.test(x)) && r.some((x) => /^Remove "/.test(x)), JSON.stringify(r));
+  await page.click('.menu button:has-text("in every line")');
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => ({ n: __tf.hiddenRanges(), same: __tf.active.model.getValue(), chip: document.getElementById('st-hidden').hidden ? '' : document.getElementById('st-hidden').textContent, deco: document.querySelectorAll('.view-line .tf-hidden').length, marks: document.querySelectorAll('.view-line .tf-hidden-mark').length }));
+  ok('The text is hidden in every line (with a ⋯ marker) and the file is unchanged', r.n === 20 && r.same === before0 && r.chip === 'Hidden: 20' && r.deco > 5 && r.marks > 5, JSON.stringify(Object.assign({}, r, { same: r.same === before0 })));
+  r = await page.evaluate(() => { const ed = __tf.editor; const l = ed.getModel().getLineContent(2); const col = l.indexOf('[', l.indexOf('[order-service]') + 3) + 1; const sp = ed.getScrolledVisiblePosition({ lineNumber: 2, column: col }); const x = ed.getDomNode().getBoundingClientRect().left + sp.left + 2; const y = ed.getDomNode().getBoundingClientRect().top + sp.top + sp.height / 2; const t = ed.getTargetAtClientPoint(x, y); return { want: col, got: t && t.position && t.position.column }; });
+  ok('Clicking text after a hidden part still lands on the right column', r.got === r.want, JSON.stringify(r));
+  await page.evaluate(() => { window.__copied = []; window.__realClip2 = window.api.clipboardWrite; window.api.clipboardWrite = async (x) => { window.__copied.push(x.text); return true; }; });
+  await page.evaluate(() => __tf.copyShown());
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => { const t = window.__copied[window.__copied.length - 1] || ''; return { has: t.includes('18244 --- [order-service]'), lines: t.split('\n').length }; });
+  ok('Copy shown leaves the hidden parts out', !r.has && r.lines >= 40, JSON.stringify(r));
+  await page.click('#st-hidden');
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => ({ chip: document.getElementById('st-hidden').textContent, shown: document.querySelectorAll('.view-line .tf-hidden-shown').length, hidden: document.querySelectorAll('.view-line .tf-hidden').length }));
+  ok('The status bar chip shows the hidden text again (marked), and hides it on the next click', r.chip === 'Hidden text shown' && r.shown > 5 && r.hidden === 0, JSON.stringify(r));
+  await page.click('#st-hidden');
+  await page.waitForTimeout(200);
+  await page.evaluate(() => __tf.showView('highlight', { toggle: false }));
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ rules: [...document.querySelectorAll('.hide-rule .hide-pat')].map((x) => x.value), ex: [...document.querySelectorAll('.hide-rule .hide-ex')].map((x) => x.textContent) }));
+  ok('Highlight > Hidden text lists the rule with the text it came from', r.rules.length === 1 && /18244/.test(r.ex[0] || ''), JSON.stringify(r));
+  await page.click('.hide-rule input[type="checkbox"]');
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => ({ n: document.querySelectorAll('.view-line .tf-hidden').length, chip: document.getElementById('st-hidden').hidden }));
+  ok('Switching a rule off shows that text again', r.n === 0 && r.chip, JSON.stringify(r));
+  await page.click('.hide-rule .icon-btn');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => __tf.settings.hideRules.length);
+  ok('A rule can be deleted', r === 0, String(r));
+  // remove (edits the text; undo puts it back)
+  await page.evaluate(() => { __tf.hideSide && __tf.hideSide(); __tf.editor.focus(); __tf.removeText('traceId=c3e09f1a7b264d58', true); });
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { const v = __tf.active.model.getValue(); return { left: (v.match(/traceId=[0-9a-f]{16}/g) || []).length, toast: document.getElementById('toast').textContent }; });
+  ok('Remove text like this takes every trace ID out of the text', r.left === 0 && /Ctrl\+Z/.test(r.toast), JSON.stringify(r));
+  await page.evaluate(() => __tf.editor.trigger('test', 'undo', null));
+  await page.waitForTimeout(200);
+  r = await page.evaluate((b0) => __tf.active.model.getValue() === b0, before0);
+  ok('…and one Ctrl+Z puts them all back', r, String(r));
+  await page.evaluate(() => { window.api.clipboardWrite = window.__realClip2; });
+
+  // ---- 0.19.0: the filters fold into a "Filters" drop down (the default); the pin keeps them open ----
+  await page.evaluate(() => { __tf.clearFilter(); __tf.settings.filtersDocked = false; __tf.setFiltersOpen(false); __tf.editor.focus(); });
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { const lb = document.getElementById('logbar').getBoundingClientRect(), ed = document.getElementById('editors').getBoundingClientRect(), row = document.getElementById('filterbar'); return { lbH: Math.round(lb.height), edTop: Math.round(ed.top), lbBottom: Math.round(lb.bottom), row: getComputedStyle(row).display !== 'none' && row.offsetParent !== null, btn: document.querySelector('#logbar .lb-fbtn').innerText.trim() }; });
+  ok('By default the filters are folded: just a Filters button on the timeline row, the log starts right below', !r.row && r.btn === 'Filters' && r.lbH <= 80 && r.edTop <= r.lbBottom + 1, JSON.stringify(r));
+  await page.click('#logbar .lb-fbtn');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { const row = document.getElementById('filterbar').getBoundingClientRect(), ed = document.getElementById('editors').getBoundingClientRect(), lb = document.getElementById('logbar').getBoundingClientRect(); return { visible: row.height > 0, over: row.top >= lb.bottom - 1 && row.top < ed.top + row.height + 4, edTop: Math.round(ed.top), exp: document.querySelector('#logbar .lb-fbtn').getAttribute('aria-expanded') }; });
+  ok('Clicking Filters drops the filter row down over the log (the log does not move)', r.visible && r.exp === 'true', JSON.stringify(r));
+  await page.click('#filterbar .lb-lvl[data-level="ERROR"]');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ open: document.querySelector('#logbar .lb-fbtn').getAttribute('aria-expanded'), btn: document.querySelector('#logbar .lb-fbtn').innerText.trim(), sum: document.querySelector('#logbar .lb-sum').innerText.replace(/\s+/g, ' ').trim() }));
+  ok('Using a filter keeps the drop down open; the button counts active filters', r.open === 'true' && r.btn === 'Filters (1)', JSON.stringify(r));
+  await page.mouse.click(900, 700);
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ open: document.querySelector('#logbar .lb-fbtn').getAttribute('aria-expanded'), sum: document.querySelector('#logbar .lb-sum').hidden ? '' : document.querySelector('#logbar .lb-sum').innerText.replace(/\s+/g, ' ').trim(), levels: [...__tf.active.filter.levels] }));
+  ok('Clicking the log folds it again; the filter stays on and the label row says "4 of 20"', r.open === 'false' && /^4 of 20/.test(r.sum) && r.levels.join() === 'ERROR', JSON.stringify(r));
+  await page.click('#logbar .lb-sum-x');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ n: __tf.active.filter.levels.size, sum: document.querySelector('#logbar .lb-sum').hidden }));
+  ok('× next to the count clears the filters', r.n === 6 && r.sum, JSON.stringify(r));
+  await page.evaluate(() => __tf.editor.focus());
+  await page.keyboard.press('Control+k');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ open: document.querySelector('#logbar .lb-fbtn').getAttribute('aria-expanded'), focus: document.activeElement && document.activeElement.id }));
+  ok('Ctrl+K opens the drop down with the cursor in the filter box', r.open === 'true' && r.focus === 'qb-input', JSON.stringify(r));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => document.querySelector('#logbar .lb-fbtn').getAttribute('aria-expanded'));
+  ok('Esc folds it', r === 'false', r);
+  await page.click('#logbar .lb-fbtn');
+  await page.click('#filterbar .lb-pin');
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => { const row = document.getElementById('filterbar').getBoundingClientRect(), ed = document.getElementById('editors').getBoundingClientRect(); return { docked: __tf.settings.filtersDocked, inFlow: row.bottom <= ed.top + 1 && row.height > 0, btn: getComputedStyle(document.querySelector('#logbar .lb-fbtn')).display }; });
+  ok('The pin keeps the filters open above the log (the Filters button goes away)', r.docked && r.inFlow && r.btn === 'none', JSON.stringify(r));
+  await page.mouse.click(900, 700);
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => document.getElementById('filterbar').getBoundingClientRect().height > 0);
+  ok('Pinned, clicking the log does not fold it', r, String(r));
 
   // ---- appearance: light theme and phone ----
   await page.evaluate(() => { __tf.setTheme('paper'); __tf.applyQuery('logger:OrderService'); __tf.setFilter({ levels: new Set(['ERROR']) }); });

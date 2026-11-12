@@ -354,3 +354,25 @@ A ROOMIER LAYOUT (0.18.2)
       results panel and the status bar step aside; Esc or Alt+M brings them back.
     Compare (Alt+D): pick another tab and see the two side by side.
     Investigate logs together (Alt+I): the incident view for several logs.
+
+HIDE OR REMOVE PART OF EVERY LINE (0.19.0)
+  Select the part of a line you don't need (a file name, a path, a thread, a long prefix)
+  and choose "Hide..." on the small toolbar above the selection (or right-click > "Hide
+  this text in every line..."):
+    Hide "<text>" in every line: exactly that text.
+    Hide text like this: the same shape with the changing parts left open, e.g. any path
+      with the same folders depth and extension, any "Something.java:123", any trace ID.
+    Remove ... from every line: really deletes it from the tab (one Ctrl+Z puts it back).
+  Hidden text is only hidden from view, in every tab; the file is unchanged. A small "..."
+  marks each place. "Hidden: N" in the status bar shows them again (click again to hide);
+  Copy shown leaves them out. Highlight (sidebar) > Hidden text lists the rules: switch
+  one off, edit its pattern, delete it, or add your own.
+
+FILTERS IN A DROP DOWN (0.19.0)
+  The filter row no longer takes room above the log. It folds into a "Filters" button at
+  the right of the timeline's label row; the log starts right under the timeline. Click
+  it (or press Ctrl+K) and the filters drop down over the log: level chips, the filter
+  box, More filters, Auto tables and the error arrows. Click the log or press Esc to
+  fold it. While a filter is on, the button says how many ("Filters (2)") and the label
+  row shows "4 of 20" with a small x to clear.
+  Prefer the old way? The pin at the end of the filter row keeps it open above the log.

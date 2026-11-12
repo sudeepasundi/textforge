@@ -464,7 +464,7 @@ const CHAT = fs.readFileSync(path.join(__dirname, 'fixtures/ai-chat-datasets.md'
     return ok(n === 2 && /line 2/.test(err || ''), `${n} matches; error: ${err}`);
   });
   await check('Multi-line filters', 'Typing two lines in "Lines matching" under More filters (Enter for the next line)', async () => {
-    await E((log) => { T.open(log, 'servers.log', 'log'); __tf.treatAsLog(__tf.active); __tf.clearFilter(); }, D.log2_servers);
+    await E((log) => { T.open(log, 'servers.log', 'log'); __tf.treatAsLog(__tf.active); __tf.settings.filtersDocked = true; __tf.clearFilter(); }, D.log2_servers);
     await page.waitForTimeout(300);
     if ((await page.getAttribute('#filterbar .lb-more', 'aria-expanded')) !== 'true') await page.click('#filterbar .lb-more');
     await page.click('#logbar .lb-advanced textarea[data-key="include"]');
