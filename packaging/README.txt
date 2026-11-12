@@ -324,8 +324,8 @@ TIMELINE AND FILTERS IN ONE BAR (0.18.1)
   Log insights (sidebar) now has only what the bar does not: a summary (format, entries,
   from, to, how long the log covers), levels as bars, your package prefix for stack
   frames (moved here from Highlight), repeated errors (tick "warnings" to include them;
-  click one to step through
-  its occurrences, Ask Copilot on hover) and tools. The filters left the sidebar.
+  click one to step through its occurrences, Ask Copilot on hover) and tools. The
+  filters left the sidebar.
   Fixed: in the results under the editor, Copy as table, Copy CSV and Open as new tab
   copied nothing for patterns without columns and left out the line numbers. They now
   copy every row with its Line, and say so when the browser blocks the clipboard.
