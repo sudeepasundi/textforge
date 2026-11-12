@@ -12,9 +12,10 @@ const state = (page) => page.evaluate(() => ({
   time: !!document.querySelector('#filterbar .qb-chip.time'),
   count: document.querySelector('#filterbar .qb-count').hidden ? '' : document.querySelector('#filterbar .qb-count').textContent,
   shown: __tf.active.an && __tf.active.an.vis ? __tf.active.an.vis.reduce((a, x) => a + x, 0) : null,
-  status: document.getElementById('st-filter').hidden ? '' : document.getElementById('st-filter').innerText.replace(/\s+/g, ' '),
+  copyShown: !document.querySelector('#filterbar .lb-copy').hidden, stFilter: !!document.getElementById('st-filter'),
   f: { text: __tf.active.filter.text, from: __tf.active.filter.from, to: __tf.active.filter.to, took: __tf.active.filter.took, levels: [...__tf.active.filter.levels], include: __tf.active.filter.include, exclude: __tf.active.filter.exclude, logger: __tf.active.filter.logger, trace: __tf.active.filter.trace },
 }));
+let copyMenu;
 const type = async (page, text) => { await page.keyboard.press('Control+k'); await page.keyboard.type(text); await page.keyboard.press('Enter'); await page.waitForTimeout(250); };
 
 (async () => {
@@ -24,16 +25,18 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   await page.goto(URL_);
   await page.waitForFunction(() => window.__tf && window.__tf.active && window.__tf.active.an, null, { timeout: 60000 });
   await page.evaluate(() => __tf.setTheme('slate'));
+  copyMenu = async (label) => { await page.click('#panel-tools .menu-btn'); await page.click('.menu button:has-text("' + label + '")'); };
   let r;
 
   // ---- layout (0.18.1: the timeline and filters form one log bar under the tabs) ----
   r = await page.evaluate(() => {
     const g = (s) => document.querySelector(s).getBoundingClientRect();
-    const bar = g('#topbar'), tabs = g('#tabrow'), lb = g('#logbar'), work = g('#work'), strip = g('#signal'), row = g('#filterbar');
-    return { underTabs: lb.top >= tabs.bottom - 1 && lb.bottom <= work.top + 1, noTitleFilter: !document.querySelector('#topbar #qb-input'), tabsBelow: tabs.top >= bar.bottom - 1,
+    const bar = g('#topbar'), tabs = g('#tabs'), lb = g('#logbar'), work = g('#work'), strip = g('#signal'), row = g('#filterbar'), brand = g('#topbar .brand'), act = g('#topbar .top-actions');
+    return { underTabs: lb.top >= bar.bottom - 1 && lb.bottom <= work.top + 1, noTitleFilter: !document.querySelector('#topbar #qb-input'),
+      tabsBelow: tabs.top >= bar.top && tabs.bottom <= bar.bottom && tabs.left >= brand.right - 1 && tabs.right <= act.left + 1 && !!document.querySelector('#topbar #tabs .tab') && !document.getElementById('tabrow'),
       stripW: Math.round(strip.width), lbW: Math.round(lb.width), rowH: Math.round(row.height), stripAbove: strip.bottom <= row.top + 1 };
   });
-  ok('The timeline and filters sit together under the file tabs; the title bar has no filter box', r.underTabs && r.noTitleFilter && r.tabsBelow && r.stripAbove, JSON.stringify(r));
+  ok('The file tabs are in the title bar; the timeline and filters sit right under it', r.underTabs && r.noTitleFilter && r.tabsBelow && r.stripAbove, JSON.stringify(r));
   ok('The timeline uses the full width and the filter row is one line at 1920 px', r.stripW >= r.lbW - 30 && r.rowH <= 46, JSON.stringify(r));
   r = await page.evaluate(() => ({ chips: [...document.querySelectorAll('#filterbar .lb-lvl')].map((c) => c.innerText.replace(/\s+/g, ' ')), bars: document.querySelectorAll('#signal .lb-bar').length,
     buckets: __tf.strip().buckets.length, stripW: document.getElementById('signal').clientWidth, start: document.querySelector('#logbar .lb-start').textContent, end: document.querySelector('#logbar .lb-end').textContent,
@@ -47,7 +50,7 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   r = await state(page);
   let lv = await page.evaluate(() => [...document.querySelectorAll('#filterbar .lb-lvl')].map((c) => c.dataset.level + ':' + (c.classList.contains('on') ? 'on' : c.classList.contains('off') ? 'off' : '-')));
   ok('Clicking ERROR shows only errors; the other chips look switched off', r.f.levels.join() === 'ERROR' && r.shown === 4 && r.count === '4 of 20 entries' && lv.join() === 'ERROR:on,WARN:off,INFO:off,DEBUG:off', JSON.stringify([r.count, lv]));
-  ok('The status bar says how many entries are shown, with Copy shown and Clear filter', /4 of 20 entries shown/.test(r.status) && /Copy shown/.test(r.status) && /Clear filter/.test(r.status), r.status);
+  ok('Copy shown sits next to the count; the status bar no longer repeats the filter summary', r.copyShown && !r.stFilter, JSON.stringify({ copyShown: r.copyShown, stFilter: r.stFilter }));
   await page.click('#filterbar .lb-lvl[data-level="WARN"]');
   await page.waitForTimeout(200);
   r = await state(page);
@@ -137,7 +140,7 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   await page.click('#filterbar .lb-more');
   await page.waitForTimeout(200);
   r = await page.evaluate(() => ({ open: !document.querySelector('#logbar .lb-advanced').hidden, exp: document.querySelector('#filterbar .lb-more').getAttribute('aria-expanded'), labels: [...document.querySelectorAll('#logbar .lb-advanced .lb-fh > span')].map((x) => x.textContent) }));
-  ok('More filters opens a row with the other filters', r.open && r.exp === 'true' && ['Lines matching', 'Hide lines matching', 'Logger or thread', 'Took at least (ms)', 'Trace IDs', 'From', 'To'].every((l) => r.labels.includes(l)), JSON.stringify(r));
+  ok('More filters opens a row with the other filters', r.open && r.exp === 'true' && ['Lines matching', 'Hide lines matching', 'Logger or thread', 'Took ≥ ms', 'Trace IDs', 'From', 'To'].every((l) => r.labels.includes(l)), JSON.stringify(r));
   await page.click('#logbar .lb-advanced input[data-key="logger"]');
   await page.keyboard.type('PaymentClient', { delay: 30 });
   await page.waitForTimeout(450);
@@ -147,16 +150,22 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   await page.waitForTimeout(200);
 
   // ---- time range ----
+  await page.click('#filterbar .lb-more'); // close More filters: its chips show in the box again
   await type(page, 'time:10:16..10:17');
   r = await state(page);
   ok('time:10:16..10:17 becomes a time-range chip', r.time && r.chips.includes('time: 10:16 to 10:17') && r.f.from === '10:16' && r.f.to === '10:17', JSON.stringify(r));
-  r = await page.evaluate(() => { const c = document.querySelector('#filterbar .qb-chip.time'); const cs = getComputedStyle(c); return { border: cs.borderTopColor, icon: !!c.querySelector('svg'), range: !document.querySelector('#signal .range').hidden, from: document.querySelector('#logbar .lb-advanced input[data-key="from"]').value }; });
-  ok('The time chip looks different (accent outline, clock), the range is outlined on the timeline and fills From', r.icon && r.border !== 'rgba(0, 0, 0, 0)' && r.range && r.from === '10:16', JSON.stringify(r));
+  r = await page.evaluate(() => { const c = document.querySelector('#filterbar .qb-chip.time'); const cs = getComputedStyle(c); return { border: cs.borderTopColor, icon: !!c.querySelector('svg'), range: !document.querySelector('#signal .range').hidden }; });
+  ok('The time chip looks different (accent outline, clock) and the range is outlined on the timeline', r.icon && r.border !== 'rgba(0, 0, 0, 0)' && r.range, JSON.stringify(r));
+  await page.click('#filterbar .lb-more');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => ({ from: document.querySelector('#logbar .lb-advanced input[data-key="from"]').value, chips: document.querySelectorAll('#filterbar .qb-chip').length }));
+  ok('With More filters open the range is in From / To, and the box drops its chips to keep room for typing', r.from === '10:16' && r.chips === 0, JSON.stringify(r));
+  await page.click('#filterbar .lb-more');
+  await page.waitForTimeout(150);
   await page.click('#filterbar .qb-chip.time .qb-x');
   await page.waitForTimeout(200);
   r = await state(page);
   ok('× on the time chip clears the range', !r.f.from && !r.f.to && !r.time, JSON.stringify(r));
-  await page.click('#filterbar .lb-more');
   const sb = await rect(page, '#signal');
   await page.mouse.move(sb.x + sb.w * 0.3, sb.y + sb.h * 0.7);
   await page.waitForTimeout(100);
@@ -284,16 +293,16 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   await page.waitForTimeout(500);
   await page.click('.at-item >> nth=1');
   await page.waitForTimeout(200);
-  await page.click('#panel-tools button:has-text("Copy as table")');
+  await copyMenu('Copy as table');
   await page.waitForTimeout(150);
   r = await page.evaluate(() => { const c = window.__copied[window.__copied.length - 1]; const rows = document.querySelectorAll('#panel-body table.grid tr').length - 1; return { lines: c.text.split('\n').filter(Boolean), html: /<table/i.test(c.html || ''), rows, toast: document.getElementById('toast').textContent }; });
   ok('Copy as table copies every row with the Line column, as a real table', r.lines.length === r.rows + 1 && /^Line\t/.test(r.lines[0]) && /^\d+\t/.test(r.lines[1]) && r.html && /Copied \d+ rows/.test(r.toast), JSON.stringify(r));
-  await page.click('#panel-tools button:has-text("Copy CSV")');
+  await copyMenu('Copy as CSV');
   await page.waitForTimeout(150);
   r = await page.evaluate(() => window.__copied[window.__copied.length - 1].text.split('\n')[0]);
   ok('Copy CSV starts with the header row, Line first', /^Line,/.test(r), r);
   const nTabs = await page.evaluate(() => __tf.tabs.length);
-  await page.click('#panel-tools button:has-text("Open as new tab")');
+  await copyMenu('Open as new tab');
   await page.waitForTimeout(300);
   r = await page.evaluate(() => ({ n: __tf.tabs.length, name: __tf.active.name, lines: __tf.active.model.getLineCount(), first: __tf.active.model.getLineContent(1) }));
   ok('Open as new tab opens the rows as CSV in a new tab', r.n === nTabs + 1 && /-table\.csv$/.test(r.name) && r.lines >= 3 && /^Line,/.test(r.first), JSON.stringify(r));
@@ -306,14 +315,14 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   for (let i = 0; i < r; i++) {
     await page.click(`.at-item >> nth=${i}`);
     await page.waitForTimeout(120);
-    await page.click('#panel-tools button:has-text("Copy as table")');
+    await copyMenu('Copy as table');
     await page.waitForTimeout(80);
     const c = await page.evaluate(() => window.__copied[window.__copied.length - 1].text.split('\n').filter(Boolean));
     if (c.length < 2 || c.slice(1).every((l) => !l.split('\t').slice(1).join('').trim())) copiedEmpty = true;
   }
   ok('Every pattern copies something, including ones with no columns (the line text is used)', r > 0 && !copiedEmpty, 'patterns ' + r);
   await page.evaluate(() => { window.api.clipboardWrite = async () => false; });
-  await page.click('#panel-tools button:has-text("Copy as table")');
+  await copyMenu('Copy as table');
   await page.waitForTimeout(150);
   r = await page.evaluate(() => document.getElementById('toast').textContent);
   ok('When the clipboard is blocked it says so instead of claiming it copied', /Could not copy/.test(r), r);
@@ -344,6 +353,55 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   r = await page.evaluate(() => !!document.querySelector('.view[data-view="highlight"] input[placeholder^="com.mycompany"]') || (__tf.showView('highlight', { toggle: false }), !!document.querySelector('.view[data-view="highlight"] input[placeholder^="com.mycompany"]')));
   ok('The package prefix lives in Log insights only (not repeated in Highlight)', r === false, String(r));
   await page.evaluate(() => __tf.hideSide && __tf.hideSide());
+
+  // ---- 0.18.2: compact More filters, time ticks, range length, zoom, Compare with… ----
+  await page.evaluate(() => { __tf.clearFilter(); __tf.activate(__tf.tabs.find((t) => /sample/.test(t.name))); });
+  await page.waitForTimeout(200);
+  if ((await page.getAttribute('#filterbar .lb-more', 'aria-expanded')) !== 'true') await page.click('#filterbar .lb-more');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { const a = document.querySelector('#logbar .lb-advanced').getBoundingClientRect(); const ta = document.querySelector('#logbar .lb-advanced textarea[data-key="include"]').getBoundingClientRect(); return { h: Math.round(a.height), ta: Math.round(ta.height) }; });
+  ok('More filters is one compact row at 1920 px (multi-line boxes are one line tall)', r.h <= 70 && r.ta <= 30, JSON.stringify(r));
+  await page.click('#logbar .lb-advanced textarea[data-key="include"]');
+  await page.waitForTimeout(100);
+  r = await page.evaluate(() => { const ta = document.querySelector('#logbar .lb-advanced textarea[data-key="include"]').getBoundingClientRect(); const ed = document.getElementById('editors').getBoundingClientRect(); const a = document.querySelector('#logbar .lb-advanced').getBoundingClientRect(); return { ta: Math.round(ta.height), over: ta.bottom > ed.top, rowH: Math.round(a.height) }; });
+  ok('A multi-line box opens over the editor while you type in it, without pushing the log down', r.ta >= 80 && r.over && r.rowH <= 70, JSON.stringify(r));
+  await page.evaluate(() => __tf.editor.focus());
+  await page.click('#filterbar .lb-more');
+  r = await page.evaluate(() => [...document.querySelectorAll('#logbar .lb-ticks span')].map((s) => s.textContent));
+  ok('Time ticks under the strip at round steps', r.length >= 5 && r.every((x) => /^\d\d:\d\d(:\d\d)?$/.test(x)), JSON.stringify(r));
+  await page.evaluate(() => __tf.setFilter({ from: '10:16:00', to: '10:17:10' }));
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ hint: document.querySelector('#logbar .lb-hint').textContent, zoom: document.querySelector('#logbar .lb-zoom').hidden ? '' : document.querySelector('#logbar .lb-zoom').textContent }));
+  ok('The hint says how long the selected range is, and Zoom to range appears', /10:16:00 – 10:17:10 \(1 min 10 s selected\)/.test(r.hint) && r.zoom === 'Zoom to range', JSON.stringify(r));
+  await page.click('#logbar .lb-zoom');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { const st = __tf.strip(); return { start: document.querySelector('#logbar .lb-start').textContent, end: document.querySelector('#logbar .lb-end').textContent, zoom: document.querySelector('#logbar .lb-zoom').textContent, total: st.buckets.reduce((a, b) => a + b.total, 0), ticks: [...document.querySelectorAll('#logbar .lb-ticks span')].map((s) => s.textContent) }; });
+  ok('Zoom to range redraws the bars over just that window (with finer ticks)', /10:16:00/.test(r.start) && /10:17:10/.test(r.end) && r.zoom === 'Show all time' && r.total > 0 && r.total < 20 && r.ticks.every((x) => /^\d\d:\d\d:\d\d$/.test(x)), JSON.stringify(r));
+  await page.click('#logbar .lb-zoom');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ start: document.querySelector('#logbar .lb-start').textContent, total: __tf.strip().buckets.reduce((a, b) => a + b.total, 0) }));
+  ok('Show all time draws the whole log again', /10:15:01/.test(r.start) && r.total === 20, JSON.stringify(r));
+  await page.evaluate(() => __tf.clearFilter());
+  // Compare with… in the tab menu, and Alt+D
+  await page.evaluate(() => { __tf.newTab({ name: 'other.log', content: 'x\ny' }); });
+  await page.waitForTimeout(150);
+  await page.click('#tabs .tab.active', { button: 'right' });
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => { const b = [...document.querySelectorAll('.menu button')].find((x) => /Compare with/.test(x.textContent)); return b ? { text: b.textContent, disabled: b.disabled } : null; });
+  ok('The tab right-click menu has Compare with… (Alt+D)', r && /Compare with…/.test(r.text) && /Alt\+D/.test(r.text) && !r.disabled, JSON.stringify(r));
+  await page.click('.menu button:has-text("Compare with")');
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => ({ modal: !document.getElementById('modal').hidden, title: (document.querySelector('#modal-box h2, #modal-box .title') || {}).textContent }));
+  ok('…which asks which tab to compare with', r.modal, JSON.stringify(r));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  await page.evaluate(() => __tf.editor.focus());
+  await page.keyboard.press('Alt+d');
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => !document.getElementById('modal').hidden);
+  ok('Alt+D opens Compare too', r, String(r));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
 
   // ---- appearance: light theme and phone ----
   await page.evaluate(() => { __tf.setTheme('paper'); __tf.applyQuery('logger:OrderService'); __tf.setFilter({ levels: new Set(['ERROR']) }); });

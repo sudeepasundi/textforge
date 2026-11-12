@@ -12,7 +12,7 @@
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" class="brand-mark logo" aria-hidden="true"><defs><linearGradient id="tfb-tile" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#243354"/><stop offset="1" stop-color="#0E1422"/></linearGradient><linearGradient id="tfb-pulse" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#4C9AFF"/><stop offset="1" stop-color="#8B73FF"/></linearGradient></defs><rect x="16" y="16" width="480" height="480" rx="112" fill="url(#tfb-tile)"/><rect x="18" y="18" width="476" height="476" rx="110" fill="none" stroke="#ffffff" stroke-opacity=".12" stroke-width="4"/><path d="M70 280h96l36-96 54 176 44-128 28 48h114" fill="none" stroke="url(#tfb-pulse)" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/><path d="M410 70l13 32 32 13-32 13-13 32-13-32-32-13 32-13z" fill="#FFB547"/></svg>
       <span>TextForge</span>
     </div>
-    <div class="top-grow"></div>
+    <div id="tabs" role="tablist"></div>
     <div class="top-actions">
       <button class="icon-btn" data-act="new" title="New tab (Ctrl+N)"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
       <button class="icon-btn" data-act="open" title="Open file (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
@@ -31,6 +31,10 @@
       <button class="rail-btn" data-view="insights" title="Log insights (Ctrl+1)"><svg viewBox="0 0 24 24"><path d="M2 12h4l3-8 4 16 3-8h6"/></svg></button>
       <button class="rail-btn" data-view="extract" title="Extract data (Ctrl+2)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg></button>
       <button class="rail-btn" data-view="highlight" title="Highlight rules (Ctrl+3)"><svg viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg></button>
+      <span class="rail-sep" aria-hidden="true"></span>
+      <button class="rail-btn" data-act="focus" aria-pressed="false" title="Focus mode: just the editor (Alt+M)"><svg viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M16 21v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg></button>
+      <button class="rail-btn" data-act="compare" title="Compare with another tab (Alt+D)"><svg viewBox="0 0 24 24"><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5M12 2v20"/></svg></button>
+      <button class="rail-btn" data-act="incident" title="Investigate logs together (Alt+I)"><svg viewBox="0 0 24 24"><path d="M3 6h8M7 12h10M4 18h6"/><path d="M15 3v2M15 8v2M15 14v2M15 19v2"/></svg></button>
       <span class="rail-grow"></span>
       <button class="rail-btn" data-view="appearance" title="Appearance and settings (Ctrl+,)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg></button>
       <button class="rail-btn" data-act="help" title="Keyboard shortcuts"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.2a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.2-2.5 3.9M12 17.5v.01"/></svg></button>
@@ -47,11 +51,11 @@
     </aside>
 
     <main id="main">
-      <div id="tabrow"><div id="tabs" role="tablist"></div></div>
       <section id="logbar" hidden aria-label="Timeline and filters">
         <div class="lb-timeline">
-          <div class="lb-labels"><span class="lb-start"></span><span class="lb-hint"></span><span class="lb-end"></span></div>
+          <div class="lb-labels"><span class="lb-start"></span><span class="lb-hint"></span><button class="lb-zoom" hidden></button><span class="lb-end"></span></div>
           <div id="signal" class="lb-strip" title=""></div>
+          <div class="lb-ticks" aria-hidden="true"></div>
         </div>
         <div id="filterbar" class="lb-row" role="search">
           <div class="lb-levels" role="group" aria-label="Levels"></div>
@@ -65,6 +69,7 @@
           </div>
           <button class="lb-more" aria-expanded="false" title="Lines matching, hide lines, logger, trace IDs, time range, duration"><span>More filters</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
           <span class="qb-count"></span>
+          <button class="lb-copy" hidden title="Copy only the entries the filter shows"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy shown</button>
           <button class="qb-clear" hidden title="Show every entry again"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>Clear filters</button>
           <span class="lb-grow"></span>
           <button class="lb-auto" title="Build one table per message pattern (Ctrl+Shift+A)"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>Auto tables</button>
@@ -142,7 +147,6 @@
     <button id="st-log" class="st-chip" hidden title="Open log insights"></button>
     <button id="st-preview" class="st-chip" hidden title="Show the formatted preview (Alt+P)">Preview</button>
     <button id="st-follow" class="st-chip" hidden title="Follow the file as it grows (live tail)">Follow</button>
-    <span id="st-filter" hidden></span>
     <span class="grow"></span>
     <select id="st-lang" title="Language mode"></select>
     <button id="st-eol" title="Switch line endings">LF</button>
