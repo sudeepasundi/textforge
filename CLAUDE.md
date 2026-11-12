@@ -118,7 +118,8 @@ command palette (~3628) · misc actions, keyboard shortcuts, init (~3745–end).
   `bestOn()` for text on the accent, and `readableAccent()` for `--accent-text`, kept at or above
   4.5:1.
 - **Log bar (0.18.1, after the owner's tracepad app https://sudeepasundi.github.io/tracepad/):** `#logbar` under the tab row
-  holds the timeline strip (`#signal`: div bars in `.lb-bars`, sqrt heights, `.dim` when the filter hides a bar, `.range`
+  holds the timeline strip (`#signal`: div bars in `.lb-bars` from `stripBuckets(an)`, one bar per ~7 px (12–180) over the
+  even time span like tracepad, sqrt heights, `.dim` outside the selected range, `.range`
   outline, hover readout in `.lb-hint`) and the filter row `#filterbar` (level chips `.lb-lvl`, the text box `#qb-input` with
   Aa / .* toggles = `filter.text/textCase/textRegex`, applied live after `Logs.filterEntries` in `computeVisibility()`,
   More filters `.lb-advanced`, count, Clear filters, Auto tables, error arrows). Text that looks like query syntax
@@ -180,7 +181,7 @@ node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
 node test/files.e2e.js         # 19  Open files list
 node test/fullscreen.e2e.js    # 38  resize and full screen everywhere, including appearance checks
 node test/incident.e2e.js      # 45  incident view: lanes, findings, time window, reader, jump to a line, requests, pins and report, phone
-node test/querybar.e2e.js      # 60  log bar (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge
+node test/querybar.e2e.js      # 65  log bar, Log insights (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge
 xvfb-run -a node test/ui-desktop.e2e.js   # 9  Electron: title bar, Copilot resize, full-screen window restore
 ```
 

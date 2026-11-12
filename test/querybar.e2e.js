@@ -36,10 +36,10 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   ok('The timeline and filters sit together under the file tabs; the title bar has no filter box', r.underTabs && r.noTitleFilter && r.tabsBelow && r.stripAbove, JSON.stringify(r));
   ok('The timeline uses the full width and the filter row is one line at 1920 px', r.stripW >= r.lbW - 30 && r.rowH <= 46, JSON.stringify(r));
   r = await page.evaluate(() => ({ chips: [...document.querySelectorAll('#filterbar .lb-lvl')].map((c) => c.innerText.replace(/\s+/g, ' ')), bars: document.querySelectorAll('#signal .lb-bar').length,
-    buckets: __tf.active.an.timeline.buckets.length, start: document.querySelector('#logbar .lb-start').textContent, end: document.querySelector('#logbar .lb-end').textContent,
+    buckets: __tf.strip().buckets.length, stripW: document.getElementById('signal').clientWidth, start: document.querySelector('#logbar .lb-start').textContent, end: document.querySelector('#logbar .lb-end').textContent,
     hint: document.querySelector('#logbar .lb-hint').textContent, count: document.querySelector('#filterbar .qb-count').textContent }));
   ok('Level chips show each level with its count', r.chips.join('|') === 'ERROR 4|WARN 3|INFO 12|DEBUG 1', JSON.stringify(r.chips));
-  ok('The timeline has one bar per time slice, the start and end times, and a hint', r.bars === r.buckets && /10:15:01/.test(r.start) && /10:18:12/.test(r.end) && /drag to filter/.test(r.hint) && r.count === '20 entries', JSON.stringify(r));
+  ok('The timeline has one bar per ~7 px (like tracepad), the start and end times, and a hint', r.bars === r.buckets && r.bars === Math.max(12, Math.min(180, Math.floor(r.stripW / 7))) && /10:15:01/.test(r.start) && /10:18:12/.test(r.end) && /drag to filter/.test(r.hint) && r.count === '20 entries', JSON.stringify(r));
 
   // ---- level chips ----
   await page.click('#filterbar .lb-lvl[data-level="ERROR"]');
@@ -176,7 +176,7 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   await page.waitForTimeout(300);
   r = await state(page);
   ok('Double-clicking the timeline removes the range', !r.time && !r.f.from && !r.f.to, JSON.stringify(r));
-  const errX = await page.evaluate(() => { const tl = __tf.active.an.timeline; const i = tl.buckets.findIndex((b) => b.error); const s = document.getElementById('signal').getBoundingClientRect(); return s.left + (i + 0.5) * (s.width / tl.buckets.length); });
+  const errX = await page.evaluate(() => { const st = __tf.strip(); const i = st.buckets.findIndex((b) => b.error); const s = document.getElementById('signal').getBoundingClientRect(); return s.left + (i + 0.5) * (s.width / st.buckets.length); });
   await page.evaluate(() => __tf.editor.setPosition({ lineNumber: 1, column: 1 }));
   await page.mouse.click(errX, sb.y + sb.h * 0.7);
   await page.waitForTimeout(300);
@@ -319,6 +319,31 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   ok('When the clipboard is blocked it says so instead of claiming it copied', /Could not copy/.test(r), r);
   await page.evaluate(() => { window.api.clipboardWrite = window.__realClip; __tf.activate(__tf.tabs.find((t) => /sample/.test(t.name))); });
   await page.waitForTimeout(200);
+
+  // ---- 0.18.1: Log insights like tracepad, and no filters in the sidebar ----
+  await page.evaluate(() => { __tf.clearFilter(); __tf.showView('insights', { toggle: false }); });
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => {
+    const v = document.querySelector('.view[data-view="insights"]');
+    return { heads: [...v.querySelectorAll('.ins-sec > h3')].map((x) => x.innerText.replace(/\s+/g, ' ').trim()), filters: !!v.querySelector('textarea, #flt-include') || /Show levels|Lines matching/.test(v.innerText),
+      keys: [...v.querySelectorAll('.ins-row')].map((x) => x.querySelector('dt').textContent + '=' + x.querySelector('dd').textContent),
+      levels: [...v.querySelectorAll('.ins-level')].map((x) => x.innerText.replace(/\s+/g, ' ').trim()), groups: v.querySelectorAll('.ins-group').length };
+  });
+  ok('Log insights: Summary, Levels, Stack frames, Repeated errors, Tools; no filter fields (they are in the log bar)', ['Summary', 'Levels', 'Stack frames', 'Tools'].every((x) => r.heads.includes(x)) && r.heads.some((x) => /^Repeated errors/.test(x)) && !r.filters, JSON.stringify(r.heads));
+  ok('The summary lists format, entries, from, to and how long the log covers', r.keys[0] === 'Format=Spring Boot' && /^Entries=20 in \d+ lines$/.test(r.keys[1]) && r.keys.some((k) => /^From=2026-11-02 10:15:01$/.test(k)) && r.keys.some((k) => /^Covers=3 min \d+ s$/.test(k)), JSON.stringify(r.keys));
+  ok('Levels are bars with counts', r.levels.join('|') === 'ERROR 4|WARN 3|INFO 12|DEBUG 1', JSON.stringify(r.levels));
+  await page.evaluate(() => __tf.editor.setPosition({ lineNumber: 1, column: 1 }));
+  await page.click('.ins-group >> nth=0');
+  await page.waitForTimeout(150);
+  const g1 = await page.evaluate(() => __tf.editor.getPosition().lineNumber);
+  await page.click('.ins-group >> nth=0');
+  await page.waitForTimeout(150);
+  const g2 = await page.evaluate(() => __tf.editor.getPosition().lineNumber);
+  r = await page.evaluate(() => document.querySelector('.ins-group .ins-gcount').textContent);
+  ok('Clicking a repeated error steps through its occurrences', r.endsWith('×') && g1 > 1 && (parseInt(r, 10) === 1 ? g2 === g1 : g2 !== g1), JSON.stringify({ r, g1, g2 }));
+  r = await page.evaluate(() => !!document.querySelector('.view[data-view="highlight"] input[placeholder^="com.mycompany"]') || (__tf.showView('highlight', { toggle: false }), !!document.querySelector('.view[data-view="highlight"] input[placeholder^="com.mycompany"]')));
+  ok('The package prefix lives in Log insights only (not repeated in Highlight)', r === false, String(r));
+  await page.evaluate(() => __tf.hideSide && __tf.hideSide());
 
   // ---- appearance: light theme and phone ----
   await page.evaluate(() => { __tf.setTheme('paper'); __tf.applyQuery('logger:OrderService'); __tf.setFilter({ levels: new Set(['ERROR']) }); });

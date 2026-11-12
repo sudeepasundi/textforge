@@ -309,10 +309,11 @@ PIN WHAT MATTERS, SHARE THE REPORT (0.18.0)
 
 TIMELINE AND FILTERS IN ONE BAR (0.18.1)
   Under the file tabs of a log there is now one bar with the timeline and the filters.
-  Timeline: one bar per slice of time, errors in red and warnings in amber on top. Hover
+  Timeline: thin bars across the full width (one per few pixels, so the shape of the
+  log is easy to read), errors in red and warnings in amber on top. Hover
   a bar to see its time and counts, click it to jump there (to its first error), drag
   across bars to show only that time range (it is outlined; double-click to clear). Bars
-  the filter hides are faded.
+  outside the chosen time range are faded.
   Filters: click ERROR, WARN, INFO... to show only those levels (click more to add them,
   Shift+click for just one). Type in "Filter entries" and the log filters as you type;
   Aa matches case, .* uses a regular expression. Typing level:error, took>1000, -noise or
@@ -320,6 +321,11 @@ TIMELINE AND FILTERS IN ONE BAR (0.18.1)
   matching, hide lines, logger or thread, duration, trace IDs and From / To. The count,
   "Clear filters", Auto tables and the previous / next error arrows sit on the same row.
   Ctrl+K puts the cursor in the filter box (in other files it opens Find).
+  Log insights (sidebar) now has only what the bar does not: a summary (format, entries,
+  from, to, how long the log covers), levels as bars, your package prefix for stack
+  frames (moved here from Highlight), repeated errors (tick "warnings" to include them;
+  click one to step through
+  its occurrences, Ask Copilot on hover) and tools. The filters left the sidebar.
   Fixed: in the results under the editor, Copy as table, Copy CSV and Open as new tab
   copied nothing for patterns without columns and left out the line numbers. They now
   copy every row with its Line, and say so when the browser blocks the clipboard.

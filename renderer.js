@@ -2155,7 +2155,7 @@
     const filtering = filterActive(f);
     renderLevelChips(bar.querySelector('.lb-levels'), an, f);
     if (document.activeElement !== input) input.value = f.text || '';
-    input.placeholder = window.innerWidth < 900 ? 'Filter entries' : window.innerWidth < 1600 ? 'Filter entries, or level:error + Enter' : 'Filter entries, or level:error  took>1000  -noise and Enter';
+    input.placeholder = 'Filter entries'; // the query syntax (level:error, took>1000…) is listed when the box gets focus
     for (const b of bar.querySelectorAll('.lb-tog')) b.setAttribute('aria-pressed', f[b.dataset.tog] ? 'true' : 'false');
     text.classList.toggle('has-text', !!String(f.text || '').trim());
     text.classList.toggle('has-error', !!an.filterError);
@@ -2404,11 +2404,50 @@
     el.textContent = text || (f && (f.from || f.to) ? TL_HINT_RANGE : TL_HINT);
     el.classList.toggle('live', !!text);
   }
+  // Bars for the strip, sized to its width like tracepad: one bar per ~7 px (12 to 180 bars), the log's time
+  // span split evenly between them. Cached per analysis, filter and bar count.
+  function stripBuckets(an) {
+    const tl = an && an.timeline;
+    const box = $('#signal');
+    if (!tl || !box) return null;
+    const width = box.clientWidth || box.parentElement.clientWidth || 0;
+    const count = Math.max(12, Math.min(180, Math.floor(width / 7)));
+    const c = an.strip;
+    if (c && c.count === count && c.vis === an.vis) return c;
+    const lo = tl.min, hi = tl.max;
+    const size = Math.max(1, hi - lo) / count;
+    const buckets = Array.from({ length: count }, (_, k) => ({ start: lo + k * size, end: lo + (k + 1) * size, total: 0, warn: 0, error: 0, shown: 0, first: -1, firstErr: -1, firstVis: -1, firstVisErr: -1 }));
+    an.entries.forEach((e, i) => {
+      if (e.ts == null || e.ts < lo) return;
+      const bk = buckets[Math.min(count - 1, Math.floor((e.ts - lo) / size))];
+      const vis = !an.vis || an.vis[i];
+      bk.total++;
+      if (bk.first < 0) bk.first = i;
+      if (vis) { bk.shown++; if (bk.firstVis < 0) bk.firstVis = i; }
+      if (e.level === 'ERROR') { bk.error++; if (bk.firstErr < 0) bk.firstErr = i; if (vis && bk.firstVisErr < 0) bk.firstVisErr = i; }
+      else if (e.level === 'WARN') bk.warn++;
+    });
+    an.strip = { count, vis: an.vis, lo, hi: lo + count * size, size, buckets };
+    return an.strip;
+  }
+  // The selected time range in ms, or null.
+  function selectedRange(an) {
+    const f = active && active.filter;
+    if (!f || (!f.from && !f.to)) return null;
+    const ref = an.entries.find((e) => e.ts != null);
+    const a = f.from ? Logs.parseTimeInput(f.from, ref ? ref.ts : null) : -Infinity;
+    let b = f.to ? Logs.parseTimeInput(f.to, ref ? ref.ts : null) : Infinity;
+    if (a == null || b == null) return null;
+    if (f.to && /^\d{1,2}:\d{2}$/.test(f.to.trim())) b += 59999;
+    else if (f.to && /:\d{2}:\d{2}$/.test(f.to.trim())) b += 999;
+    return { a, b };
+  }
   function renderSignal() {
     const tlBox = $('#logbar .lb-timeline');
     const box = $('#signal');
     const an = active && isLogTab(active) ? active.an : null;
     const tl = an ? an.timeline : null;
+    $('#logbar').hidden = !an; // shown before measuring the strip's width
     tlBox.hidden = !settings.signal || !an;
     if (tlBox.hidden) return;
     const start = tlBox.querySelector('.lb-start'), end = tlBox.querySelector('.lb-end');
@@ -2423,45 +2462,36 @@
       renderSignalRange(null);
       return;
     }
-    start.textContent = Logs.formatTs(tl.min, true);
-    end.textContent = Logs.formatTs(tl.max, true) + '  ·  ' + Logs.formatDuration(tl.max - tl.min);
-    end.title = 'Each bar is ' + Logs.formatDuration(tl.size);
+    const st = stripBuckets(an);
+    start.textContent = Logs.formatTs(st.lo, true);
+    end.textContent = Logs.formatTs(st.hi, true);
+    end.title = Logs.formatDuration(tl.max - tl.min) + ' in ' + st.count + ' bars of ' + Logs.formatDuration(Math.max(1, Math.round(st.size)));
     timelineHint();
-    // entries the filter shows, per bar
-    let vis = null;
-    if (an.vis) {
-      vis = new Uint32Array(tl.buckets.length);
-      an.entries.forEach((e, i) => { if (an.vis[i] && e.ts != null) { const k = Math.floor((e.ts - tl.base) / tl.size); if (k >= 0 && k < vis.length) vis[k]++; } });
-    }
-    const max = Math.max(1, ...tl.buckets.map((b) => b.total));
-    const pct = (v) => (v ? 'max(2px, ' + (Math.sqrt(v / max) * 100).toFixed(1) + '%)' : '0');
+    const max = Math.max(1, ...st.buckets.map((b) => b.total));
+    const pct = (v) => (v ? Math.max(8, Math.sqrt(v / max) * 100).toFixed(1) + '%' : '0');
+    const sel = selectedRange(an);
     const frag = document.createDocumentFragment();
-    tl.buckets.forEach((b, i) => {
-      const bar = h('div', { class: 'lb-bar' + (vis && !vis[i] ? ' dim' : '') });
+    st.buckets.forEach((b) => {
+      const outside = sel && (b.end <= sel.a || b.start > sel.b);
+      const bar = h('div', { class: 'lb-bar' + (outside ? ' dim' : '') });
       bar.append(h('i', { class: 'all', style: 'height:' + pct(b.total) }));
       if (b.warn + b.error) bar.append(h('i', { class: 'warn', style: 'height:' + pct(b.warn + b.error) }));
       if (b.error) bar.append(h('i', { class: 'error', style: 'height:' + pct(b.error) }));
       frag.append(bar);
     });
     bars.append(frag);
-    renderSignalRange(tl);
+    renderSignalRange(st);
   }
 
   // The time range from the filter, outlined on the strip.
-  function renderSignalRange(tl) {
+  function renderSignalRange(st) {
     const box = $('#signal');
     let shade = box.querySelector('.range');
     if (!shade) { shade = h('div', { class: 'range', hidden: true }); box.append(shade); }
-    const f = active && active.filter;
-    if (!tl || !f || (!f.from && !f.to)) { shade.hidden = true; return; }
-    const an = active.an;
-    const ref = an.entries.find((e) => e.ts != null);
-    const start = tl.buckets[0].start, span = tl.buckets.length * tl.size;
-    const a = f.from ? Logs.parseTimeInput(f.from, ref ? ref.ts : null) : start;
-    let b = f.to ? Logs.parseTimeInput(f.to, ref ? ref.ts : null) : start + span;
-    if (f.to && /^\d{1,2}:\d{2}$/.test(f.to.trim())) b += 59999;
-    if (a == null || b == null) { shade.hidden = true; return; }
-    const pa = Math.max(0, Math.min(1, (a - start) / span)), pb = Math.max(0, Math.min(1, (b - start) / span));
+    const sel = st ? selectedRange(active.an) : null;
+    if (!sel) { shade.hidden = true; return; }
+    const span = st.hi - st.lo;
+    const pa = Math.max(0, Math.min(1, (sel.a - st.lo) / span)), pb = Math.max(0, Math.min(1, (sel.b - st.lo) / span));
     shade.hidden = false;
     shade.style.left = (pa * 100) + '%';
     shade.style.width = (Math.max(0, pb - pa) * 100) + '%';
@@ -2469,11 +2499,12 @@
 
   function signalBucketAt(clientX) {
     const an = active && active.an;
-    if (!an || !an.timeline) return null;
+    const st = an ? stripBuckets(an) : null;
+    if (!st) return null;
     const rect = $('#signal').getBoundingClientRect();
-    const n = an.timeline.buckets.length;
+    const n = st.buckets.length;
     const i = Math.min(n - 1, Math.max(0, Math.floor(((clientX - rect.left) / rect.width) * n)));
-    return { i, b: an.timeline.buckets[i], x: clientX - rect.left, tl: an.timeline };
+    return { i, b: st.buckets[i], x: clientX - rect.left, st };
   }
 
   function wireSignal() {
@@ -2487,10 +2518,8 @@
       if (el) el.classList.add('hover');
     };
     const describe = (r) => {
-      const an = active.an;
-      let shown = null;
-      if (an.vis) { shown = 0; for (let i = r.b.first; i >= 0 && i < an.entries.length && an.entries[i].ts != null && an.entries[i].ts < r.b.start + r.tl.size; i++) if (an.vis[i]) shown++; }
-      return Logs.formatTs(r.b.start) + ' – ' + Logs.formatTs(r.b.start + r.tl.size) + '  ·  ' + r.b.total + ' entr' + (r.b.total === 1 ? 'y' : 'ies') +
+      const shown = active.an.vis ? r.b.shown : null;
+      return Logs.formatTs(r.b.start) + ' – ' + Logs.formatTs(r.b.end) + '  ·  ' + r.b.total + ' entr' + (r.b.total === 1 ? 'y' : 'ies') +
         (shown != null ? ' (' + shown + ' shown)' : '') + (r.b.error ? ', ' + r.b.error + ' error' + (r.b.error === 1 ? '' : 's') : '') + (r.b.warn ? ', ' + r.b.warn + ' warning' + (r.b.warn === 1 ? '' : 's') : '');
     };
     box.addEventListener('mousemove', (e) => {
@@ -2519,7 +2548,7 @@
       band.style.left = (a - rect.left) + 'px';
       band.style.width = (b - a) + 'px';
       const ra = signalBucketAt(a), rb = signalBucketAt(b - 1);
-      if (ra && rb) timelineHint(Logs.formatTs(ra.b.start) + '  to  ' + Logs.formatTs(rb.b.start + rb.tl.size) + '  ·  release to filter');
+      if (ra && rb) timelineHint(Logs.formatTs(ra.b.start) + ' – ' + Logs.formatTs(rb.b.end) + '  ·  release to filter');
     });
     const endDrag = (e) => {
       if (!drag) return;
@@ -2533,12 +2562,11 @@
       const a = Math.max(rect.left, Math.min(d.x0, e.clientX)), b = Math.min(rect.right, Math.max(d.x0, e.clientX));
       const ra = signalBucketAt(a), rb = signalBucketAt(b - 1);
       if (!ra || !rb) { timelineHint(); return; }
-      const from = ra.b.start;
-      const to = Math.ceil((rb.b.start + rb.tl.size) / 1000) * 1000 - 1;
-      // one-day logs get short times (10:15:35); logs that span days keep the date
-      const tl = ra.tl;
-      const oneDay = Logs.formatTs(tl.min, true).slice(0, 10) === Logs.formatTs(tl.max, true).slice(0, 10);
-      setFilter({ from: Logs.formatTs(Math.floor(from / 1000) * 1000, !oneDay), to: Logs.formatTs(to, !oneDay) });
+      // whole seconds; "to" covers its whole second. One-day logs get short times (10:15:35), longer logs keep the date.
+      const from = Math.floor(ra.b.start / 1000) * 1000;
+      const to = Math.floor(rb.b.end / 1000) * 1000;
+      const oneDay = Logs.formatTs(ra.st.lo, true).slice(0, 10) === Logs.formatTs(ra.st.hi, true).slice(0, 10);
+      setFilter({ from: Logs.formatTs(from, !oneDay), to: Logs.formatTs(to, !oneDay) });
       timelineHint();
     };
     let suppressClick = false;
@@ -2553,17 +2581,9 @@
       if (suppressClick) { suppressClick = false; return; }
       const r = signalBucketAt(e.clientX);
       if (!r || r.b.first < 0) return;
-      const an = active.an;
-      let idx = r.b.first;
-      // prefer the first error in that bucket, then the first visible entry
-      let firstVis = -1;
-      for (let i = r.b.first; i < an.entries.length && an.entries[i].ts != null && an.entries[i].ts < r.b.start + r.tl.size; i++) {
-        if (an.vis && !an.vis[i]) continue;
-        if (firstVis < 0) firstVis = i;
-        if (an.entries[i].level === 'ERROR') { idx = i; firstVis = -2; break; }
-      }
-      if (firstVis >= 0) idx = firstVis;
-      revealEntry(idx);
+      // the first error in that bar (one the filter shows, if any), else its first shown entry
+      const b = r.b;
+      revealEntry([b.firstVisErr, b.firstVis, b.firstErr, b.first].find((x) => x >= 0));
     });
   }
 
@@ -2752,56 +2772,40 @@
   }
 
   // ---------- insights ----------
+  // Log insights (0.18.1, after tracepad): summary, levels, stack frames, repeated errors. Filters live in the log bar.
+  const LEVEL_ROWS = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE', 'OTHER'];
+  function spanText(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return 'under a second';
+    const s = Math.round(ms / 1000);
+    if (s < 60) return s + ' s';
+    if (s < 3600) return Math.floor(s / 60) + ' min ' + (s % 60) + ' s';
+    if (s < 86400) return Math.floor(s / 3600) + ' h ' + Math.floor((s % 3600) / 60) + ' min';
+    return Math.floor(s / 86400) + ' d ' + Math.floor((s % 86400) / 3600) + ' h';
+  }
   function renderInsights() {
     const v = view('insights');
     v.innerHTML = '';
     if (!active) return;
     if (!isLogTab(active)) {
-      v.append(h('div', { class: 'empty' },
-        h('p', null, 'This tab isn\'t recognised as a log, so log tools are off.'),
-        h('p', { class: 'hint' }, 'Open a .log file or paste log lines into an empty tab and they are detected automatically. Spring Boot, Logback/Log4j, JSON, access logs and syslog are supported.'),
+      v.append(h('section', { class: 'ins-sec' },
+        h('p', { class: 'hint' }, active.name + ' is not being treated as a log. TextForge looks for lines that start with a timestamp (Spring Boot, Logback/Log4j, JSON lines, access logs, syslog and others).'),
         h('button', { class: 'primary', onclick: () => { treatAsLog(active); renderInsights(); } }, 'Treat this tab as a log')));
       return;
     }
-    const f = active.filter;
-    const filterInput = (key, label, placeholder, mono) => h('div', { class: 'field' },
-      h('label', null, label),
-      h('input', { type: 'text', value: f[key], placeholder, spellcheck: false, style: mono ? 'font-family:var(--mono);font-size:12px' : null,
-        oninput: debounce((e) => setFilter({ [key]: e.target.value }), 250) }));
-    // Multi-line box: one pattern per line; grows with its content.
-    const grow = (ta) => { ta.style.height = 'auto'; ta.style.height = Math.min(220, ta.scrollHeight + 2) + 'px'; };
-    const filterLinesBox = (key, label, placeholder, extra) => {
-      const ta = h('textarea', { id: 'flt-' + key, class: 'flt-lines', rows: 2, spellcheck: false, placeholder,
-        oninput: (e) => { grow(e.target); setLater(key, e.target.value); } });
-      ta.value = f[key] || '';
-      setTimeout(() => grow(ta), 0);
-      return h('div', { class: 'field' }, h('div', { class: 'row', style: 'justify-content:space-between' }, h('label', { for: 'flt-' + key }, label), extra || null), ta);
-    };
-    const setLater = debounce((key, val) => setFilter({ [key]: val }), 250);
-    const modeSel = h('select', { class: 'mini', title: 'With several lines: show entries matching any line, or all of them',
-      onchange: (e) => setFilter({ includeMode: e.target.value }) },
-      h('option', { value: 'any', selected: f.includeMode !== 'all' }, 'any line'),
-      h('option', { value: 'all', selected: f.includeMode === 'all' }, 'all lines'));
-
+    const pk = h('input', { type: 'text', class: 'ins-input', value: settings.myPackages, spellcheck: false, autocomplete: 'off', placeholder: 'com.mycompany',
+      oninput: debounce((e) => { settings.myPackages = e.target.value; saveSettings(); tabs.forEach((t) => { if (isLogTab(t)) { t.an = null; analyze(t); } refreshDecorations(t); }); onActiveAnalysisChanged(); updateInsights(); }, 400) });
     v.append(
-      h('div', { class: 'group' }, h('div', { id: 'ins-summary' })),
-      h('div', { class: 'group' }, h('h3', null, 'Show levels'), h('div', { class: 'chips', id: 'ins-chips' })),
-      h('div', { class: 'group' },
-        h('h3', null, 'Filter'),
-        h('p', { class: 'hint', style: 'margin-top:0' }, 'One pattern per line (press Enter for the next). Regex works too.'),
-        filterLinesBox('include', 'Lines matching', 'orderId=90005\nSocketTimeout\nCRITICAL', h('span', { class: 'row', style: 'gap:6px;font-size:12px;color:var(--muted)' }, 'match', modeSel)),
-        filterLinesBox('exclude', 'Hide lines matching', 'HealthCheck\nactuator'),
-        filterInput('logger', 'Logger or thread contains', 'e.g. PaymentClient or exec-3'),
-        filterLinesBox('trace', 'Trace / request IDs', 'One ID per line, or right-click an ID in the log'),
-        h('div', { class: 'row' }, filterInput('from', 'From', '10:15 or 2026-11-02 10:15'), filterInput('to', 'To', '10:20')),
-        h('button', { onclick: clearFilter }, 'Clear filter')),
-      h('div', { class: 'group' },
-        h('h3', null, 'Repeated errors ', h('span', { class: 'count', id: 'ins-gcount' })),
-        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: settings.groupWarn,
-          onchange: (e) => { settings.groupWarn = e.target.checked; saveSettings(); analyze(active); updateInsights(); } }), 'Include warnings'),
-        h('div', { class: 'err-list', id: 'ins-groups' })),
-      h('div', { class: 'group' },
-        h('h3', null, 'Tools'),
+      h('section', { class: 'ins-sec' }, h('h3', null, 'Summary'), h('dl', { class: 'ins-keys', id: 'ins-summary' })),
+      h('section', { class: 'ins-sec' }, h('h3', null, 'Levels'), h('div', { class: 'ins-levels', id: 'ins-levels' })),
+      h('section', { class: 'ins-sec' }, h('h3', null, 'Stack frames'),
+        h('label', { class: 'ins-field' }, h('span', null, 'Your package prefix (its frames are highlighted, the rest dimmed)'), pk),
+        h('p', { class: 'hint small' }, 'Several prefixes: separate them with commas. Left empty, frames from common libraries (java., org.springframework., org.apache.…) are dimmed.')),
+      h('section', { class: 'ins-sec' },
+        h('h3', { class: 'ins-h-row' }, h('span', { id: 'ins-gtitle' }, 'Repeated errors'),
+          h('label', { class: 'ins-check', title: 'Group warnings too' }, h('input', { type: 'checkbox', checked: settings.groupWarn,
+            onchange: (e) => { settings.groupWarn = e.target.checked; saveSettings(); analyze(active); updateInsights(); } }), 'warnings')),
+        h('ul', { class: 'ins-groups', id: 'ins-groups', role: 'list' })),
+      h('section', { class: 'ins-sec' }, h('h3', null, 'Tools'),
         h('div', { class: 'row wrap' },
           h('button', { onclick: () => editor.trigger('tf', 'editor.foldAll') }, 'Fold stack traces'),
           h('button', { onclick: () => editor.trigger('tf', 'editor.unfoldAll') }, 'Unfold all'),
@@ -2814,52 +2818,49 @@
   function updateInsights() {
     if (currentView !== 'insights' || !active || !isLogTab(active) || !$('#ins-summary')) { if (currentView === 'insights' && !$('#ins-summary')) renderInsights(); return; }
     const an = analyze(active);
-    const shown = an.vis ? an.vis.reduce((a, b) => a + b, 0) : an.entries.length;
     const tl = an.timeline;
+    const row = (k, val) => h('div', { class: 'ins-row' }, h('dt', null, k), h('dd', null, val));
     const sum = $('#ins-summary');
     sum.innerHTML = '';
-    sum.append(
-      h('p', { class: 'hint', style: 'margin-top:0' }, (an.formatLabel || 'Generic') + ' log' + (an.vis ? ', ' + shown + ' entries match the filter' : '')),
-      h('div', { class: 'summary' },
-        h('div', { class: 'is-err' }, h('b', null, an.counts.ERROR), h('span', null, 'errors')),
-        h('div', { class: 'is-warn' }, h('b', null, an.counts.WARN), h('span', null, 'warnings')),
-        h('div', null, h('b', null, an.entries.length.toLocaleString()), h('span', null, 'entries')),
-        h('div', null, h('b', null, tl ? Logs.formatDuration(tl.max - tl.min) : 'n/a'), h('span', null, tl ? 'from ' + Logs.formatTs(tl.min) : 'time span'))));
-    const chips = $('#ins-chips');
-    chips.innerHTML = '';
-    for (const lvl of Logs.LEVEL_CHIPS) {
-      const on = active.filter.levels.has(lvl);
-      chips.append(h('button', {
-        class: 'chip ' + (on ? 'on' : 'off'), 'data-level': lvl, title: 'Click to toggle, double-click to show only ' + lvl.toLowerCase(),
-        onclick: (e) => {
-          if (e.detail > 1) return;
-          const s = new Set(active.filter.levels);
-          if (s.has(lvl)) s.delete(lvl); else s.add(lvl);
-          setFilter({ levels: s });
-        },
-        ondblclick: () => setFilter({ levels: new Set([lvl]) }),
-      }, h('i'), lvl === 'OTHER' ? 'Other' : lvl[0] + lvl.slice(1).toLowerCase(), h('b', null, an.counts[lvl])));
+    sum.append(row('Format', an.formatLabel || 'Generic'),
+      row('Entries', an.entries.length.toLocaleString() + ' in ' + an.lines.length.toLocaleString() + ' lines'));
+    if (tl) sum.append(row('From', Logs.formatTs(tl.min, true)), row('To', Logs.formatTs(tl.max, true)), row('Covers', spanText(tl.max - tl.min)));
+    const lv = $('#ins-levels');
+    lv.innerHTML = '';
+    const max = Math.max(1, ...LEVEL_ROWS.map((l) => an.counts[l] || 0));
+    for (const l of LEVEL_ROWS) {
+      const n = an.counts[l] || 0;
+      if (!n) continue;
+      lv.append(h('div', { class: 'ins-level', 'data-level': l },
+        h('span', { class: 'ins-lname' }, l),
+        h('span', { class: 'ins-track' }, h('i', { style: 'width:' + Math.max(2, (n / max) * 100) + '%' })),
+        h('span', { class: 'ins-lcount' }, n.toLocaleString())));
     }
+    $('#ins-gtitle').textContent = settings.groupWarn ? 'Repeated errors and warnings' : 'Repeated errors';
     const list = $('#ins-groups');
     list.innerHTML = '';
-    $('#ins-gcount').textContent = an.groups.length ? an.groups.length + ' kinds' : '';
-    if (!an.groups.length) list.append(h('p', { class: 'hint' }, 'No errors in this log.'));
+    if (!an.groups.length) list.append(h('li', { class: 'hint' }, settings.groupWarn ? 'No errors or warnings in this log.' : 'No errors in this log.'));
+    // Click steps through the occurrences, starting after the cursor.
+    const visit = (g) => {
+      const at = (editor.getPosition() || { lineNumber: 1 }).lineNumber - 1;
+      const next = g.entries.find((i) => an.entries[i].start > at);
+      revealEntry(next != null ? next : g.entries[0]);
+    };
     an.groups.slice(0, 60).forEach((g) => {
-      let k = 0;
-      const item = h('button', {
-        class: 'err-item' + (g.level === 'WARN' ? ' warn' : ''),
-        title: 'Click to jump through occurrences',
-        onclick: () => { revealEntry(g.entries[k % g.entries.length]); k++; },
-      },
-      h('div', { class: 'top' }, h('span', { class: 'title' }, g.title), h('span', { class: 'n' }, g.count + '×')),
-      h('div', { class: 'msg' }, g.sample),
-      g.frame ? h('div', { class: 'where' }, 'at ' + g.frame) : null,
-      g.firstTs != null ? h('div', { class: 'msg' }, g.count > 1 && g.lastTs !== g.firstTs ? 'first ' + Logs.formatTs(g.firstTs) + ', last ' + Logs.formatTs(g.lastTs) : 'at ' + Logs.formatTs(g.firstTs)) : null,
-      g.rootCause && g.rootCause.split('.').pop() !== g.title ? h('div', { class: 'msg' }, 'Root cause: ' + g.rootCause) : null);
-      const ask = h('button', { class: 'ghost', style: 'font-size:11.5px;padding:1px 6px;margin-top:4px',
+      const exc = g.title && g.title !== g.sample ? g.title.split('.').pop() : '';
+      const ask = h('button', { class: 'ins-ask', title: 'Ask Copilot to explain this error',
         onclick: (e) => { e.stopPropagation(); const en = an.entries[g.entries[0]]; askCopilot('explain', Logs.entryText(an.lines, en, 80), 'This error happened ' + g.count + ' times.'); } }, 'Ask Copilot');
-      item.append(ask);
-      list.append(item);
+      list.append(h('li', null, h('div', {
+        class: 'ins-group', role: 'button', tabindex: '0',
+        title: g.sample + (g.frame ? '\nat ' + g.frame : '') + '\n\nClick to step through the ' + g.count + ' occurrence' + (g.count === 1 ? '' : 's'),
+        onclick: () => visit(g), onkeydown: (e) => { if (e.key === 'Enter') visit(g); },
+      },
+      h('span', { class: 'ins-gcount' + (g.level === 'WARN' ? ' warn' : '') }, g.count.toLocaleString() + '×'),
+      h('span', { class: 'ins-gtext' },
+        exc ? h('span', { class: 'ins-gexc' }, exc) : null,
+        h('span', { class: 'ins-gmsg' }, g.sample),
+        g.firstTs != null ? h('span', { class: 'ins-gwhen' }, g.count > 1 && g.lastTs !== g.firstTs ? Logs.formatTs(g.firstTs) + ' – ' + Logs.formatTs(g.lastTs) : Logs.formatTs(g.firstTs)) : null),
+      ask)));
     });
   }
 
@@ -3205,8 +3206,6 @@
     const v = view('highlight');
     v.innerHTML = '';
     const refresh = debounce(() => { saveSettings(); updateRuleStyles(); tabs.forEach(refreshDecorations); }, 300);
-    const pk = h('input', { type: 'text', value: settings.myPackages, spellcheck: false, placeholder: 'com.mycompany, com.example',
-      oninput: debounce((e) => { settings.myPackages = e.target.value; saveSettings(); tabs.forEach((t) => { if (isLogTab(t)) { t.an = null; analyze(t); } refreshDecorations(t); }); onActiveAnalysisChanged(); }, 400) });
     const list = h('div');
     const drawRules = () => {
       list.innerHTML = '';
@@ -3224,9 +3223,6 @@
     };
     drawRules();
     v.append(
-      h('div', { class: 'group' }, h('h3', null, 'Your code'),
-        h('div', { class: 'field' }, h('label', null, 'Your packages (comma separated)'), pk),
-        h('p', { class: 'hint' }, 'Stack-trace lines from these packages are highlighted in your accent colour and used to show where errors happen. Framework frames are dimmed.')),
       h('div', { class: 'group' }, h('h3', null, 'Highlight rules'),
         h('p', { class: 'hint' }, 'Any regex, any colour. Rules apply to every open tab and also show as hover labels.'),
         list,
@@ -5139,7 +5135,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
