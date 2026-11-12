@@ -2677,6 +2677,7 @@
   const VIEW_TITLES = { files: 'Open files', insights: 'Log insights', extract: 'Extract data', highlight: 'Highlight rules', copilot: 'Copilot', appearance: 'Appearance and settings' };
 
   function showView(name, { toggle = true } = {}) {
+    if (document.body.classList.contains('focus-mode')) { focusPrevView = null; toggleFocusMode(false); }
     if (name === 'copilot') { openCopilot({ toggle }); return; }
     const side = $('#side');
     if (toggle && currentView === name && !side.hidden) { hideSide(); return; }
@@ -2693,6 +2694,26 @@
     ({ files: renderFiles, insights: renderInsights, extract: renderExtract, highlight: renderHighlight, copilot: renderCopilot, appearance: renderAppearance })[name]();
     setTimeout(() => editor && editor.layout(), 0);
   }
+  // Focus mode (0.18.2): just the editor. The sidebar, the log bar, the results panel and the status bar step aside;
+  // the title bar and the rail stay (the rail button, Alt+M or Esc bring everything back).
+  let focusPrevView = null;
+  function toggleFocusMode(on) {
+    const now = document.body.classList.contains('focus-mode');
+    if (on === undefined) on = !now;
+    if (on === now) return;
+    if (on) {
+      focusPrevView = currentView && currentView !== 'copilot' ? currentView : null;
+      if (currentView && currentView !== 'copilot') hideSide();
+      if (copilotOpen()) closeCopilot();
+    }
+    document.body.classList.toggle('focus-mode', on);
+    const b = $('#rail [data-act="focus"]');
+    if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+    if (!on && focusPrevView) { const v = focusPrevView; focusPrevView = null; showView(v, { toggle: false }); }
+    if (on) toast('Focus mode. Esc or Alt+M brings the panels back.', 2600);
+    setTimeout(() => { if (editor) editor.layout(); if (!on) { renderSignal(); } }, 0);
+  }
+
   function hideSide() {
     $('#side').hidden = true;
     document.body.classList.remove('side-open');
@@ -2799,7 +2820,7 @@
     if (!list.length) ul.append(h('div', { class: 'msg' }, q ? 'No open file matches "' + filesState.q + '".' : 'No files open.'));
     v.append(ul,
       canReorder ? h('p', { class: 'hint fl-hint' }, 'Drag files to change their order, or drag one onto the editor to show it side by side.') : h('p', { class: 'hint fl-hint' }, 'Switch to "Tab order" with no filter to drag files into a new order.'),
-      quickShortcuts());
+    );
     const nl = v.querySelector('.fl-list');
     if (nl) nl.scrollTop = prevScroll;
     if (searchFocused) { search.focus(); if (caret != null) search.setSelectionRange(caret, caret); }
@@ -4865,6 +4886,7 @@
       ['Preview in full screen', 'View', 'Alt+Shift+P', () => (active && active.preview ? enterFullscreen($('#preview'), { label: 'The preview' }) : setPreview(true, { full: true }))],
       ...(fsEl ? [['Exit full screen', 'View', 'Esc', exitFullscreen]] : []),
       ['Rename tab', 'File', 'double-click a tab', () => active && startRename(active)],
+      [document.body.classList.contains('focus-mode') ? 'Leave focus mode' : 'Focus mode: just the editor', 'View', 'Alt+M', () => toggleFocusMode()],
       ['Toggle sidebar', 'View', 'Ctrl+B', () => (currentView ? hideSide() : showView(settings.view || 'insights', { toggle: false }))],
       ['Appearance and settings', 'View', 'Ctrl+,', () => showView('appearance', { toggle: false })],
       ['Keyboard shortcuts', 'Help', '', showHelp],
@@ -4884,29 +4906,6 @@
     let j = 0;
     for (let k = 0; k < t.length && j < q.length; k++) if (t[k] === q[j]) { idx.push(k); j++; }
     return j === q.length ? { score: 100 - (idx[idx.length - 1] - idx[0]), idx } : null;
-  }
-
-  // Shortcuts at the bottom of the Open files view (0.18.2): the commands people reach for most, with their keys,
-  // one click away instead of searching the command palette. Log-only ones show when the tab is a log.
-  const QUICK = [
-    ['Filter the log', 'Filter the log', true], ['Next error', 'Next error', true], ['Auto tables', 'Auto tables', true],
-    ['Investigate logs together', 'Investigate logs together', false], ['Compare with another tab', 'Compare with…', false],
-    ['Split view: show', 'Split view', false], ['Close split view', 'Close split view', false], ['Find in all open tabs', 'Find in all tabs', false],
-    ['Table view of selection', 'Table from selection', false], ['Toggle preview', 'Preview', false], ['Open Copilot panel', 'Copilot', false],
-  ];
-  function quickShortcuts() {
-    const log = !!(active && isLogTab(active));
-    const cmds = commands();
-    const rows = [{ label: 'Search all commands', key: 'Ctrl+Shift+P', run: () => openPalette() }];
-    for (const [prefix, label, logOnly] of QUICK) {
-      if (logOnly && !log) continue;
-      const c = cmds.find((x) => x.label.startsWith(prefix));
-      if (c && !rows.some((x) => x.run === c.run)) rows.push({ label, key: c.key, run: c.run });
-    }
-    return h('section', { class: 'fl-quick', 'aria-label': 'Shortcuts' },
-      h('h3', null, 'Shortcuts'),
-      h('div', { class: 'fl-quick-list' }, rows.map((x) => h('button', { class: 'fl-q', title: x.label + (x.key ? ' (' + x.key + ')' : ''), onclick: () => x.run() },
-        h('span', null, x.label), x.key ? h('kbd', null, x.key.replace(/\+/g, ' ')) : null))));
   }
 
   function openPalette(initial) {
@@ -5023,6 +5022,9 @@
     close: () => active && closeTab(active),
     palette: openPalette,
     help: showHelp,
+    focus: () => toggleFocusMode(),
+    compare: pickCompare,
+    incident: () => { if (incident && !$('#incident')) reopenIncident(); else pickIncident(); },
     wrap: () => { settings.wrap = !settings.wrap; saveSettings(); applyEditorOptions(); },
   };
 
@@ -5064,6 +5066,8 @@
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyW') actions.close();
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyT') openTableView();
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyD') { e.preventDefault(); pickCompare(); }
+    else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyM') { e.preventDefault(); toggleFocusMode(); }
+    else if (e.key === 'Escape' && document.body.classList.contains('focus-mode') && !$('.menu') && !document.fullscreenElement) toggleFocusMode(false);
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyI') { if (incident && !$('#incident')) reopenIncident(); else pickIncident(); }
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyP') setPreview(!(active && active.preview));
     else if (e.altKey && !ctrl && e.shiftKey && e.code === 'KeyP') {
@@ -5224,7 +5228,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { zoomTimeline, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });

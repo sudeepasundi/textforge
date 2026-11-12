@@ -1173,12 +1173,9 @@ body.web #cp-fab { display: none !important; }
 .lb-labels .lb-hint { flex: 1; }
 body.compact .lb-ticks { height: 13px; }
 
-/* 0.18.2: shortcuts at the bottom of Open files (instead of New / Open / Close saved buttons) */
+/* 0.18.2 */
 .fl-hint { margin: 6px 0 0; font-size: 11.5px; }
-.fl-quick { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
-.fl-quick h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--fg); }
-.fl-quick-list { display: flex; flex-direction: column; gap: 1px; margin: 0 -6px; }
-.fl-q { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; padding: 5px 6px; border: none; border-radius: 5px; background: none; color: var(--fg); font-size: 12.5px; text-align: left; cursor: pointer; }
-.fl-q:hover, .fl-q:focus-visible { background: color-mix(in srgb, var(--fg) 7%, transparent); outline: none; }
-.fl-q span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fl-q kbd { flex: none; font: 11px var(--mono); color: var(--muted); background: color-mix(in srgb, var(--fg) 6%, var(--bg)); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+
+/* 0.18.2: shortcut buttons in the rail, and focus mode */
+.rail-sep { width: 22px; height: 1px; margin: 4px 0; background: var(--line); flex: none; }
+body.focus-mode #side, body.focus-mode #side-resize, body.focus-mode #logbar, body.focus-mode #panel, body.focus-mode #statusbar, body.focus-mode #cp-fab { display: none !important; }

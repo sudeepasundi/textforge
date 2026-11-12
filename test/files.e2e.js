@@ -126,13 +126,37 @@ const names = (page) => page.evaluate(() => [...document.querySelectorAll('.view
   await page.waitForTimeout(200);
   r = await page.evaluate(() => ({ hscroll: document.documentElement.scrollWidth > innerWidth, items: document.querySelectorAll('.fl-item').length }));
   ok('Works on a phone without sideways scrolling', !r.hscroll && r.items > 5, JSON.stringify(r));
-  // 0.18.2: no New / Open / Close saved buttons (the title bar has them); clickable shortcuts instead
-  r = await page.evaluate(() => { __tf.showView('files', { toggle: false }); const v = document.querySelector('.view[data-view="files"]'); return { buttons: [...v.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => /^(New tab|Open a file…|Close saved)$/.test(t)), quick: [...v.querySelectorAll('.fl-q')].map((b) => b.innerText.replace(/\s+/g, ' ').trim()) }; });
-  ok('Open files has no New tab / Open / Close saved buttons, and lists shortcuts with their keys', r.buttons.length === 0 && /^Search all commands Ctrl Shift P$/.test(r.quick[0]) && r.quick.some((x) => /^Compare with… Alt D$/.test(x)) && r.quick.length >= 8, JSON.stringify(r));
-  await page.click('.view[data-view="files"] .fl-q:has-text("Search all commands")');
+  // 0.18.2: no New / Open / Close saved buttons (the title bar has them, Close saved is in the palette)
+  r = await page.evaluate(() => { __tf.showView('files', { toggle: false }); const v = document.querySelector('.view[data-view="files"]'); return { buttons: [...v.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => /^(New tab|Open a file…|Close saved)$/.test(t)), list: !!v.querySelector('.fl-quick') }; });
+  ok('Open files has no New tab / Open / Close saved buttons (they are in the title bar and the palette)', r.buttons.length === 0 && !r.list, JSON.stringify(r));
+  // 0.18.2: shortcut buttons in the rail: focus mode, compare, investigate (at a desktop size)
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(250);
+  await page.evaluate(() => __tf.showView('files', { toggle: false }));
+  r = await page.evaluate(() => [...document.querySelectorAll('#rail [data-act]')].map((b) => b.dataset.act));
+  ok('The rail has shortcut buttons: focus mode, compare, investigate logs', ['focus', 'compare', 'incident'].every((x) => r.includes(x)), JSON.stringify(r));
+  const shown = () => page.evaluate(() => { const vis = (id) => { const e = document.getElementById(id); return !!e && !e.hidden && getComputedStyle(e).display !== 'none'; }; return { side: vis('side'), logbar: vis('logbar'), status: vis('statusbar'), rail: vis('rail'), top: vis('topbar'), on: document.querySelector('#rail [data-act="focus"]').getAttribute('aria-pressed'), edW: Math.round(document.getElementById('editors').getBoundingClientRect().width) }; });
+  const fm0 = await shown();
+  await page.click('#rail [data-act="focus"]');
+  await page.waitForTimeout(250);
+  r = await shown();
+  ok('Focus mode leaves just the editor (rail and title bar stay)', !r.side && !r.logbar && !r.status && r.rail && r.top && r.on === 'true' && r.edW > fm0.edW, JSON.stringify({ fm0, r }));
+  await page.evaluate(() => __tf.editor.focus());
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  r = await shown();
+  ok('Esc brings everything back, including the sidebar view that was open', r.side && r.status && r.on === 'false', JSON.stringify(r));
+  await page.keyboard.press('Alt+m');
   await page.waitForTimeout(200);
-  r = await page.evaluate(() => !document.getElementById('palette').hidden);
-  ok('A shortcut runs its command when clicked', r, String(r));
+  const a1 = await shown();
+  await page.keyboard.press('Alt+m');
+  await page.waitForTimeout(200);
+  const a2 = await shown();
+  ok('Alt+M switches focus mode on and off', a1.on === 'true' && !a1.side && a2.on === 'false' && a2.side, JSON.stringify({ a1, a2 }));
+  await page.click('#rail [data-act="compare"]');
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => (!document.getElementById('modal').hidden ? 'modal' : document.getElementById('toast').textContent));
+  ok('The compare button asks which tab to compare with', r === 'modal' || /another tab/.test(r), r);
   await page.keyboard.press('Escape');
   ok('No errors', errors.length === 0, errors.join(' | ') || 'none');
   let pass = 0;

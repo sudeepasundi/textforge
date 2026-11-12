@@ -348,7 +348,9 @@ A ROOMIER LAYOUT (0.18.2)
   "Copy" menu.
   Compare is easier to find: right-click a tab > "Compare with..." or press Alt+D.
   Open files (sidebar): the New tab / Open a file / Close saved buttons are gone (New and
-  Open are in the title bar; "Close saved tabs" is in the command palette). In their
-  place is a Shortcuts list: the commands you use most, with their keys, one click away
-  (search commands, filter the log, next error, Auto tables, incident, Compare, split
-  view, find in all tabs, table from selection, preview, Copilot).
+  Open are in the title bar; "Close saved tabs" is in the command palette).
+  New buttons in the left rail, under the sidebar icons:
+    Focus mode (Alt+M): just the editor. The sidebar, the timeline and filters, the
+      results panel and the status bar step aside; Esc or Alt+M brings them back.
+    Compare (Alt+D): pick another tab and see the two side by side.
+    Investigate logs together (Alt+I): the incident view for several logs.

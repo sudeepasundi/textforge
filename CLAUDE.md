@@ -125,7 +125,8 @@ command palette (~3628) · misc actions, keyboard shortcuts, init (~3745–end).
   More filters `.lb-advanced`, count, Clear filters, Auto tables, error arrows). Text that looks like query syntax
   (`isQueryLike`) waits for Enter and goes through `applyQuery()`. The title bar holds the file tabs again (0.18.2;
   `#tabrow` is gone). Timeline extras (0.18.2): `renderTicks()`, `tab.tlZoom` via `zoomTimeline()`, `spanLabel()` in the hint.
-  `showMenu(items, x, y)` is the shared small menu (tab menu, results Copy menu). Levels are
+  `showMenu(items, x, y)` is the shared small menu (tab menu, results Copy menu). Rail action buttons (`data-act` focus,
+  compare, incident) sit under the view icons; focus mode is `body.focus-mode` via `toggleFocusMode()` (Alt+M, Esc). Levels are
   shown by the chips, not as a query chip. Chips come from
   `filterChips(tab.filter)`, each with the patch that removes it; typed text goes through `applyQuery()`. New filter
   syntax needs both: a branch in `applyQuery()` and a chip in `filterChips()`. `filter.took` (ms) is applied after
@@ -180,7 +181,7 @@ node test/autotables.e2e.js    # 10
 node test/layout.e2e.js        # 16  sidebar, density, split basics, timeline drag
 node test/workspace.e2e.js     # 22  panel resize, tab rename/reorder, multi-pane split, shared filters/search
 node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
-node test/files.e2e.js         # 21  Open files list, shortcuts
+node test/files.e2e.js         # 25  Open files list, rail shortcut buttons, focus mode
 node test/fullscreen.e2e.js    # 38  resize and full screen everywhere, including appearance checks
 node test/incident.e2e.js      # 45  incident view: lanes, findings, time window, reader, jump to a line, requests, pins and report, phone
 node test/querybar.e2e.js      # 75  log bar, Log insights, zoom/ticks, Copy menu, Compare with… (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge
