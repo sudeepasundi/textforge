@@ -367,3 +367,12 @@ HIDE OR REMOVE PART OF EVERY LINE (0.19.0)
   marks each place. "Hidden: N" in the status bar shows them again (click again to hide);
   Copy shown leaves them out. Highlight (sidebar) > Hidden text lists the rules: switch
   one off, edit its pattern, delete it, or add your own.
+
+FILTERS IN A DROP DOWN (0.19.0)
+  The filter row no longer takes room above the log. It folds into a "Filters" button at
+  the right of the timeline's label row; the log starts right under the timeline. Click
+  it (or press Ctrl+K) and the filters drop down over the log: level chips, the filter
+  box, More filters, Auto tables and the error arrows. Click the log or press Esc to
+  fold it. While a filter is on, the button says how many ("Filters (2)") and the label
+  row shows "4 of 20" with a small x to clear.
+  Prefer the old way? The pin at the end of the filter row keeps it open above the log.

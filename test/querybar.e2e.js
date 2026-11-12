@@ -24,7 +24,7 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   const errors = []; page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(URL_);
   await page.waitForFunction(() => window.__tf && window.__tf.active && window.__tf.active.an, null, { timeout: 60000 });
-  await page.evaluate(() => __tf.setTheme('slate'));
+  await page.evaluate(() => { __tf.setTheme('slate'); __tf.settings.filtersDocked = true; __tf.setFilter({}); }); // most checks use the pinned filter row; the drop down has its own section
   copyMenu = async (label) => { await page.click('#panel-tools .menu-btn'); await page.click('.menu button:has-text("' + label + '")'); };
   let r;
 
@@ -460,6 +460,46 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   r = await page.evaluate((b0) => __tf.active.model.getValue() === b0, before0);
   ok('…and one Ctrl+Z puts them all back', r, String(r));
   await page.evaluate(() => { window.api.clipboardWrite = window.__realClip2; });
+
+  // ---- 0.19.0: the filters fold into a "Filters" drop down (the default); the pin keeps them open ----
+  await page.evaluate(() => { __tf.clearFilter(); __tf.settings.filtersDocked = false; __tf.setFiltersOpen(false); __tf.editor.focus(); });
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { const lb = document.getElementById('logbar').getBoundingClientRect(), ed = document.getElementById('editors').getBoundingClientRect(), row = document.getElementById('filterbar'); return { lbH: Math.round(lb.height), edTop: Math.round(ed.top), lbBottom: Math.round(lb.bottom), row: getComputedStyle(row).display !== 'none' && row.offsetParent !== null, btn: document.querySelector('#logbar .lb-fbtn').innerText.trim() }; });
+  ok('By default the filters are folded: just a Filters button on the timeline row, the log starts right below', !r.row && r.btn === 'Filters' && r.lbH <= 80 && r.edTop <= r.lbBottom + 1, JSON.stringify(r));
+  await page.click('#logbar .lb-fbtn');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { const row = document.getElementById('filterbar').getBoundingClientRect(), ed = document.getElementById('editors').getBoundingClientRect(), lb = document.getElementById('logbar').getBoundingClientRect(); return { visible: row.height > 0, over: row.top >= lb.bottom - 1 && row.top < ed.top + row.height + 4, edTop: Math.round(ed.top), exp: document.querySelector('#logbar .lb-fbtn').getAttribute('aria-expanded') }; });
+  ok('Clicking Filters drops the filter row down over the log (the log does not move)', r.visible && r.exp === 'true', JSON.stringify(r));
+  await page.click('#filterbar .lb-lvl[data-level="ERROR"]');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ open: document.querySelector('#logbar .lb-fbtn').getAttribute('aria-expanded'), btn: document.querySelector('#logbar .lb-fbtn').innerText.trim(), sum: document.querySelector('#logbar .lb-sum').innerText.replace(/\s+/g, ' ').trim() }));
+  ok('Using a filter keeps the drop down open; the button counts active filters', r.open === 'true' && r.btn === 'Filters (1)', JSON.stringify(r));
+  await page.mouse.click(900, 700);
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ open: document.querySelector('#logbar .lb-fbtn').getAttribute('aria-expanded'), sum: document.querySelector('#logbar .lb-sum').hidden ? '' : document.querySelector('#logbar .lb-sum').innerText.replace(/\s+/g, ' ').trim(), levels: [...__tf.active.filter.levels] }));
+  ok('Clicking the log folds it again; the filter stays on and the label row says "4 of 20"', r.open === 'false' && /^4 of 20/.test(r.sum) && r.levels.join() === 'ERROR', JSON.stringify(r));
+  await page.click('#logbar .lb-sum-x');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ n: __tf.active.filter.levels.size, sum: document.querySelector('#logbar .lb-sum').hidden }));
+  ok('× next to the count clears the filters', r.n === 6 && r.sum, JSON.stringify(r));
+  await page.evaluate(() => __tf.editor.focus());
+  await page.keyboard.press('Control+k');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ open: document.querySelector('#logbar .lb-fbtn').getAttribute('aria-expanded'), focus: document.activeElement && document.activeElement.id }));
+  ok('Ctrl+K opens the drop down with the cursor in the filter box', r.open === 'true' && r.focus === 'qb-input', JSON.stringify(r));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => document.querySelector('#logbar .lb-fbtn').getAttribute('aria-expanded'));
+  ok('Esc folds it', r === 'false', r);
+  await page.click('#logbar .lb-fbtn');
+  await page.click('#filterbar .lb-pin');
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => { const row = document.getElementById('filterbar').getBoundingClientRect(), ed = document.getElementById('editors').getBoundingClientRect(); return { docked: __tf.settings.filtersDocked, inFlow: row.bottom <= ed.top + 1 && row.height > 0, btn: getComputedStyle(document.querySelector('#logbar .lb-fbtn')).display }; });
+  ok('The pin keeps the filters open above the log (the Filters button goes away)', r.docked && r.inFlow && r.btn === 'none', JSON.stringify(r));
+  await page.mouse.click(900, 700);
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => document.getElementById('filterbar').getBoundingClientRect().height > 0);
+  ok('Pinned, clicking the log does not fold it', r, String(r));
 
   // ---- appearance: light theme and phone ----
   await page.evaluate(() => { __tf.setTheme('paper'); __tf.applyQuery('logger:OrderService'); __tf.setFilter({ levels: new Set(['ERROR']) }); });

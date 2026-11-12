@@ -143,6 +143,9 @@ command palette (~3628) · misc actions, keyboard shortcuts, init (~3745–end).
   steps) and carry the note; `Logs.incidentReport()` writes the Markdown; `reportMarkdown()` masks it;
   "Copy for Teams / Outlook" uses `richHtml()` (shared with the preview's Copy as rich text). Pins survive
   reopening the same incident; closing asks first.
+- **Filters drop down (0.19.0):** `#filterbar` and `.lb-advanced` sit in `.lb-drop`; unless `settings.filtersDocked` (the pin)
+  they fold into the `.lb-fbtn` button on the timeline label row and open over the log (`#logbar.open`, `setFiltersOpen()`).
+  Tests that use the filter row set `filtersDocked = true` first.
 - **Hidden text (0.19.0):** `settings.hideRules` ([{ pattern, example, on }]) hide matching parts of lines in every tab via
   decorations (`tf-hidden` = `display:none` with `inlineClassNameAffectsLetterSpacing: true`, so Monaco measures it as zero
   wide and the cursor stays right; a `before` injected "⋯" marks the spot). `likePattern()` turns a selection into "text like
@@ -189,7 +192,7 @@ node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
 node test/files.e2e.js         # 25  Open files list, rail shortcut buttons, focus mode
 node test/fullscreen.e2e.js    # 38  resize and full screen everywhere, including appearance checks
 node test/incident.e2e.js      # 45  incident view: lanes, findings, time window, reader, jump to a line, requests, pins and report, phone
-node test/querybar.e2e.js      # 87  log bar, Log insights, zoom/ticks, Copy menu, Compare with…, hidden text (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge
+node test/querybar.e2e.js      # 96  log bar, Filters drop down, Log insights, zoom/ticks, Copy menu, Compare with…, hidden text (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge
 xvfb-run -a node test/ui-desktop.e2e.js   # 9  Electron: title bar, Copilot resize, full-screen window restore
 ```
 

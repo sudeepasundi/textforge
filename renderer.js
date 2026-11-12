@@ -2195,6 +2195,7 @@
     else cnt.append(total + ' entries');
     cnt.classList.toggle('none', filtering && shown === 0);
     cnt.title = (an.formatLabel || 'Log') + ' log' + (filtering && shown === 0 ? '. Nothing matches, so the full log is shown.' : '');
+    applyFilterMode(an, f, filtering, shown, total);
     // Copy shown sits next to the count while a filter is on (0.18.2: the status bar no longer repeats the summary)
     bar.querySelector('.lb-copy').hidden = !filtering || shown === 0;
     bar.querySelector('.qb-clear').hidden = !filtering;
@@ -2227,6 +2228,40 @@
       field('To', input('to', '10:20')),
     );
     adv.querySelectorAll('.lb-f').forEach((el, i) => el.classList.add('lb-f' + i));
+  }
+
+  // Filters drop down (0.19.0): by default the filter row and More filters fold into a "Filters" button on the
+  // timeline's label row and open over the log, so they take no room while you read. The pin keeps them open above
+  // the log as before (settings.filtersDocked).
+  let filtersOpen = false;
+  function filterKinds(f) {
+    let n = 0;
+    if (f.levels.size !== Logs.LEVEL_CHIPS.length) n++;
+    if (String(f.text || '').trim()) n++;
+    return n + advancedCount(f);
+  }
+  function applyFilterMode(an, f, filtering, shown, total) {
+    const lb = $('#logbar');
+    const docked = !!settings.filtersDocked;
+    lb.classList.toggle('docked', docked);
+    lb.classList.toggle('open', !docked && filtersOpen);
+    const btn = lb.querySelector('.lb-fbtn');
+    const n = filterKinds(f);
+    btn.querySelector('span').textContent = 'Filters' + (n ? ' (' + n + ')' : '');
+    btn.classList.toggle('has', !!n);
+    btn.setAttribute('aria-expanded', !docked && filtersOpen ? 'true' : 'false');
+    const sum = lb.querySelector('.lb-sum');
+    sum.innerHTML = '';
+    sum.hidden = docked || !filtering;
+    if (!sum.hidden) sum.append(h('b', null, shown.toLocaleString()), ' of ' + total, h('button', { class: 'lb-sum-x', title: 'Clear filters', 'aria-label': 'Clear filters', onclick: (e) => { e.stopPropagation(); clearFilter(); } }, '×'));
+    const pin = lb.querySelector('.lb-pin');
+    pin.setAttribute('aria-pressed', docked ? 'true' : 'false');
+    pin.title = docked ? 'Fold the filters into the Filters button' : 'Keep the filters open above the log';
+  }
+  function setFiltersOpen(on) {
+    if (settings.filtersDocked) return;
+    filtersOpen = !!on;
+    renderFilterBar();
   }
 
   function wireFilterRow() {
@@ -2266,7 +2301,7 @@
         e.preventDefault();
         e.stopPropagation();
         if (input.value) { input.value = ''; if (active && active.filter.text) setFilter({ text: '' }); }
-        else { input.blur(); editor.focus(); }
+        else { input.blur(); if (!settings.filtersDocked && filtersOpen) setFiltersOpen(false); editor.focus(); }
       } else if (e.key === 'Backspace' && !input.value && active && isLogTab(active)) {
         const chips = filterChips(active.filter);
         if (chips.length) { e.preventDefault(); setFilter(chips[chips.length - 1].clear); if (currentView === 'insights') renderInsights(); }
@@ -2281,12 +2316,26 @@
     bar.querySelector('.lb-copy').onclick = () => copyShown();
     bar.querySelector('.lb-more').onclick = () => { moreOpen = !moreOpen; renderFilterBar(); };
     bar.querySelector('.lb-auto').onclick = () => { extractState.preset = 'auto'; if (currentView === 'extract') renderExtract(); runAutoTables(); };
+    $('#logbar .lb-fbtn').onclick = () => setFiltersOpen(!filtersOpen);
+    bar.querySelector('.lb-pin').onclick = () => { settings.filtersDocked = !settings.filtersDocked; filtersOpen = false; saveSettings(); renderFilterBar(); setTimeout(() => editor && editor.layout(), 0); };
+    // a press outside the log bar (on the log, the sidebar…) folds the drop down
+    document.addEventListener('mousedown', (e) => {
+      if (!filtersOpen || settings.filtersDocked) return;
+      if (e.target.closest('#logbar, .menu, #modal, #palette, #toast')) return;
+      setFiltersOpen(false);
+    }, true);
+    $('#logbar .lb-drop').addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || settings.filtersDocked || !filtersOpen) return;
+      if (e.target === input && input.value) return; // the box clears its text first
+      e.preventDefault(); e.stopPropagation();
+      setFiltersOpen(false); editor.focus();
+    });
     bar.querySelector('.lb-prev').onclick = () => jumpError(-1);
     bar.querySelector('.lb-next').onclick = () => jumpError(1);
   }
   // Ctrl+K: the filter box for logs; the editor's find box for other files.
   function focusQueryBar() {
-    if (active && isLogTab(active) && !$('#logbar').hidden) { const i = $('#qb-input'); i.focus(); i.select(); return; }
+    if (active && isLogTab(active) && !$('#logbar').hidden) { if (!settings.filtersDocked && !filtersOpen) setFiltersOpen(true); const i = $('#qb-input'); i.focus(); i.select(); return; }
     editor.focus();
     editor.trigger('tf', 'actions.find');
   }
@@ -2591,7 +2640,8 @@
     const an = active && isLogTab(active) ? active.an : null;
     const tl = an ? an.timeline : null;
     $('#logbar').hidden = !an; // shown before measuring the strip's width
-    tlBox.hidden = !settings.signal || !an;
+    tlBox.hidden = !an;
+    tlBox.classList.toggle('no-strip', !settings.signal);
     if (tlBox.hidden) return;
     const start = tlBox.querySelector('.lb-start'), end = tlBox.querySelector('.lb-end');
     let bars = box.querySelector('.lb-bars');
@@ -5393,7 +5443,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { likePattern, addHideRule, removeText, hiddenRanges: () => (active ? hiddenRanges(active).length : 0), refreshHidden, zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { setFiltersOpen, likePattern, addHideRule, removeText, hiddenRanges: () => (active ? hiddenRanges(active).length : 0), refreshHidden, zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
