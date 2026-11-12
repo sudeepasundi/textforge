@@ -1145,3 +1145,6 @@ body.frameless #logbar { -webkit-app-region: no-drag; }
 .ins-gwhen { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; opacity: .85; }
 .ins-ask { position: absolute; right: 6px; top: 5px; display: none; padding: 1px 7px; font-size: 11px; border-radius: 4px; border: 1px solid var(--line); background: var(--raised); color: var(--fg); }
 .ins-group:hover .ins-ask, .ins-group:focus-within .ins-ask { display: block; }
+
+/* the web build has no floating Copilot button (0.18.1) */
+body.web #cp-fab { display: none !important; }

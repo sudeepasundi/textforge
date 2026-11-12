@@ -477,11 +477,11 @@ const CHAT = fs.readFileSync(path.join(__dirname, 'fixtures/ai-chat-datasets.md'
     await page.click('#filterbar .lb-more');
     return ok(r.n === 2 && r.v.split('\n').length === 2, `box holds ${r.v.split('\n').length} lines; ${r.n} entries shown`);
   });
-  await check('Copilot pane', 'Floating button opens the Copilot pane over the editor', async () => {
-    await E(() => { __tf.settings.cpDock = false; __tf.settings.cpRect = null; });
-    await page.click('#cp-fab');
+  await check('Copilot pane', 'Alt+4 opens the pane over the editor (the web page has no floating button)', async () => {
+    await E(() => { __tf.settings.cpDock = false; __tf.settings.cpRect = null; T.ed().focus(); });
+    await page.keyboard.press('Alt+4');
     await page.waitForTimeout(300);
-    const r = await E(() => { const h = document.getElementById('cp-host'); const s = getComputedStyle(h); return { open: !h.hidden, pos: s.position, bar: h.querySelectorAll('.cp-bar').length, fabOn: document.getElementById('cp-fab').classList.contains('on') }; });
+    const r = await E(() => { const h = document.getElementById('cp-host'); const s = getComputedStyle(h); return { open: !h.hidden, pos: s.position, bar: h.querySelectorAll('.cp-bar').length, fabOn: getComputedStyle(document.getElementById('cp-fab')).display === 'none' }; });
     return ok(r.open && r.pos === 'absolute' && r.bar === 0 && r.fabOn, `open ${r.open}, ${r.pos} (floating), no action bar`);
   });
   await check('Copilot pane', 'Dock to the side and back; editor makes room when docked', async () => {

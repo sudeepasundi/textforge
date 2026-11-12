@@ -326,6 +326,8 @@ TIMELINE AND FILTERS IN ONE BAR (0.18.1)
   frames (moved here from Highlight), repeated errors (tick "warnings" to include them;
   click one to step through its occurrences, Ask Copilot on hover) and tools. The
   filters left the sidebar.
+  The web page no longer shows the floating Copilot button. Copilot is still there from
+  Alt+4, the command palette and right-click > Ask Copilot. The desktop app keeps it.
   Fixed: in the results under the editor, Copy as table, Copy CSV and Open as new tab
   copied nothing for patterns without columns and left out the line numbers. They now
   copy every row with its Line, and say so when the browser blocks the clipboard.

@@ -207,7 +207,9 @@ const fills = (r, w) => r && r.x === 0 && r.y === 0 && r.w === w.w && r.h === w.
   await page.evaluate(() => { const p = document.getElementById('panel'); p.style.height = Math.round(innerHeight * 0.6) + 'px'; window.dispatchEvent(new Event('resize')); });
   await page.waitForTimeout(300);
   r = await page.evaluate(() => { const f = document.getElementById('cp-fab').getBoundingClientRect(), m = document.getElementById('main').getBoundingClientRect(), p = document.getElementById('panel').getBoundingClientRect(); return { bottomGap: Math.round(m.bottom - f.bottom), rightGap: Math.round(m.right - f.right), fabTop: Math.round(f.top), panelTop: Math.round(p.top) }; });
-  ok('The Copilot button stays in the bottom-right corner when the results panel is tall (it no longer climbs over the editor)', r.bottomGap <= 30 && r.rightGap <= 30 && r.fabTop > r.panelTop, JSON.stringify(r));
+  // 0.18.1: no floating Copilot button on the web page at all
+  r = await page.evaluate(() => getComputedStyle(document.getElementById('cp-fab')).display);
+  ok('The web page has no floating Copilot button, even with a tall results panel', r === 'none', r);
   await page.evaluate(() => { document.querySelector('#panel-close').click(); __tf.openCopilot({ toggle: false }); });
   await page.waitForTimeout(300);
   await page.click('#cp-full');

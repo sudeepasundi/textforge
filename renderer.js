@@ -41,6 +41,8 @@
 
   // ---------------- platform ----------------
   const IS_WEB = api.platform === 'web';
+  // The web build has no floating Copilot button (Copilot opens from the rail, the palette or right-click).
+  if (IS_WEB) document.body.classList.add('web');
   const CAN = Object.assign({ embeddedCopilot: true, sessionStoresContent: false, canDownload: true }, api.capabilities || {});
   const WEB = window.TF_WEB || {};
   const APP_VERSION = WEB.version || api.version || '';
