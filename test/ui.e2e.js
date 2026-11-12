@@ -102,18 +102,10 @@ if (shots) fs.mkdirSync(shots, { recursive: true });
   });
   // 0.15.1: the button no longer climbs above the results panel (it ended up over the editor text when the panel
   // was tall). It stays in the bottom-right corner, clear of the status bar, the panel's toolbar and its scrollbar.
-  await check('Overlaps', 'Copilot button stays in its corner, clear of the status bar and the panel controls', async () => {
-    const a = await E(() => { const f = document.getElementById('cp-fab').getBoundingClientRect(); const s = document.getElementById('statusbar').getBoundingClientRect(); return f.bottom <= s.top; });
-    await E(() => __tf.runCommand('Find in all open tabs'));
-    await page.waitForTimeout(200);
-    const b = await E(() => {
-      const f = document.getElementById('cp-fab').getBoundingClientRect(), head = document.getElementById('panel-head').getBoundingClientRect(), body = document.getElementById('panel-body');
-      const br = body.getBoundingClientRect(); const scrollbarLeft = br.left + body.clientWidth;
-      const main = document.getElementById('main').getBoundingClientRect();
-      return { belowHead: f.top >= head.bottom, clearOfScrollbar: f.right <= scrollbarLeft, corner: main.bottom - f.bottom <= 30 && main.right - f.right <= 30 };
-    });
-    await reset();
-    return ok(a && b.belowHead && b.clearOfScrollbar && b.corner, `above status bar ${a}, ${JSON.stringify(b)}`);
+  // 0.18.1: the web build has no floating Copilot button; Copilot opens from the side rail (and palette, right-click).
+  await check('Overlaps', 'The web page has no floating Copilot button (Copilot stays in the palette, Alt+4 and right-click)', async () => {
+    const r = await E(() => getComputedStyle(document.getElementById('cp-fab')).display);
+    return ok(r === 'none', r);
   });
   await check('Overlaps', 'Welcome screen sits above the minimap and is fully clickable', async () => {
     await E(() => { const t = __tf.newTab({}); __tf.activate(t); });

@@ -463,23 +463,25 @@ const CHAT = fs.readFileSync(path.join(__dirname, 'fixtures/ai-chat-datasets.md'
     await E(() => __tf.clearFilter());
     return ok(n === 2 && /line 2/.test(err || ''), `${n} matches; error: ${err}`);
   });
-  await check('Multi-line filters', 'Typing two lines in the "Lines matching" box (Enter for the next line)', async () => {
-    await E((log) => { T.open(log, 'servers.log', 'log'); __tf.treatAsLog(__tf.active); __tf.clearFilter(); __tf.showView('insights', { toggle: false }); }, D.log2_servers);
+  await check('Multi-line filters', 'Typing two lines in "Lines matching" under More filters (Enter for the next line)', async () => {
+    await E((log) => { T.open(log, 'servers.log', 'log'); __tf.treatAsLog(__tf.active); __tf.clearFilter(); }, D.log2_servers);
     await page.waitForTimeout(300);
-    await page.click('#flt-include');
+    if ((await page.getAttribute('#filterbar .lb-more', 'aria-expanded')) !== 'true') await page.click('#filterbar .lb-more');
+    await page.click('#logbar .lb-advanced textarea[data-key="include"]');
     await page.keyboard.type('restored');
     await page.keyboard.press('Enter');
     await page.keyboard.type('Restart completed');
     await page.waitForTimeout(600);
-    const r = await E(() => ({ v: document.getElementById('flt-include').value, n: __tf.active.an.vis ? __tf.active.an.vis.reduce((x, y) => x + y, 0) : -1 }));
-    await E(() => { __tf.clearFilter(); __tf.showView('insights'); });
+    const r = await E(() => ({ v: document.querySelector('#logbar .lb-advanced textarea[data-key="include"]').value, n: __tf.active.an.vis ? __tf.active.an.vis.reduce((x, y) => x + y, 0) : -1 }));
+    await E(() => __tf.clearFilter());
+    await page.click('#filterbar .lb-more');
     return ok(r.n === 2 && r.v.split('\n').length === 2, `box holds ${r.v.split('\n').length} lines; ${r.n} entries shown`);
   });
-  await check('Copilot pane', 'Floating button opens the Copilot pane over the editor', async () => {
-    await E(() => { __tf.settings.cpDock = false; __tf.settings.cpRect = null; });
-    await page.click('#cp-fab');
+  await check('Copilot pane', 'Alt+4 opens the pane over the editor (the web page has no floating button)', async () => {
+    await E(() => { __tf.settings.cpDock = false; __tf.settings.cpRect = null; T.ed().focus(); });
+    await page.keyboard.press('Alt+4');
     await page.waitForTimeout(300);
-    const r = await E(() => { const h = document.getElementById('cp-host'); const s = getComputedStyle(h); return { open: !h.hidden, pos: s.position, bar: h.querySelectorAll('.cp-bar').length, fabOn: document.getElementById('cp-fab').classList.contains('on') }; });
+    const r = await E(() => { const h = document.getElementById('cp-host'); const s = getComputedStyle(h); return { open: !h.hidden, pos: s.position, bar: h.querySelectorAll('.cp-bar').length, fabOn: getComputedStyle(document.getElementById('cp-fab')).display === 'none' }; });
     return ok(r.open && r.pos === 'absolute' && r.bar === 0 && r.fabOn, `open ${r.open}, ${r.pos} (floating), no action bar`);
   });
   await check('Copilot pane', 'Dock to the side and back; editor makes room when docked', async () => {

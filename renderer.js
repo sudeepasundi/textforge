@@ -41,6 +41,8 @@
 
   // ---------------- platform ----------------
   const IS_WEB = api.platform === 'web';
+  // The web build has no floating Copilot button (Copilot opens from the rail, the palette or right-click).
+  if (IS_WEB) document.body.classList.add('web');
   const CAN = Object.assign({ embeddedCopilot: true, sessionStoresContent: false, canDownload: true }, api.capabilities || {});
   const WEB = window.TF_WEB || {};
   const APP_VERSION = WEB.version || api.version || '';
@@ -1859,7 +1861,7 @@
   // LOG ANALYSIS
   // ======================================================================
   function emptyFilter() {
-    return { levels: new Set(Logs.LEVEL_CHIPS), include: '', includeMode: 'any', exclude: '', logger: '', trace: '', from: '', to: '', took: '' };
+    return { levels: new Set(Logs.LEVEL_CHIPS), include: '', includeMode: 'any', exclude: '', logger: '', trace: '', from: '', to: '', took: '', text: '', textCase: false, textRegex: false };
   }
   // Multi-line filter boxes: each non-empty line is one pattern.
   const filterLines = (v) => String(v || '').split('\n').map((x) => x.trim()).filter(Boolean);
@@ -1874,7 +1876,13 @@
   }
 
   function filterActive(f) {
-    return !!f.lines || f.levels.size !== Logs.LEVEL_CHIPS.length || filterLines(f.include).length || filterLines(f.exclude).length || f.logger || filterLines(f.trace).length || f.from || f.to || !!f.took;
+    return !!f.lines || f.levels.size !== Logs.LEVEL_CHIPS.length || filterLines(f.include).length || filterLines(f.exclude).length || f.logger || filterLines(f.trace).length || f.from || f.to || !!f.took || !!String(f.text || '').trim();
+  }
+  // The live text box of the filter row: plain text, or a regular expression with .*; Aa matches case.
+  function textQuery(f) {
+    const t = String(f.text || '').trim();
+    if (!t) return { re: null };
+    try { return { re: new RegExp(f.textRegex ? t : reEscape(t), f.textCase ? '' : 'i') }; } catch (e) { return { re: null, error: e.message }; }
   }
   function safeRegex(src) {
     if (!src) return { re: null };
@@ -1906,7 +1914,8 @@
     if (!filterActive(f)) return;
     const inc = linesRegex(f.include, f.includeMode);
     const exc = linesRegex(f.exclude, 'any');
-    an.filterError = inc.error || exc.error || null;
+    const tq = textQuery(f);
+    an.filterError = inc.error || exc.error || (tq.error ? 'filter text: ' + tq.error : null);
     const ref = an.entries.find((e) => e.ts != null);
     const ids = filterLines(f.trace);
     const trace = ids.length ? ids : '';
@@ -1938,6 +1947,14 @@
         if (!an.vis[i]) return;
         const m = TOOK_RE.exec(an.lines[e.start] || '');
         if (!m || tookMs(m) < min) an.vis[i] = 0;
+      });
+    }
+    if (an.vis && tq.re) {
+      an.entries.forEach((e, i) => {
+        if (!an.vis[i]) return;
+        let hit = false;
+        for (let l = e.start; l <= e.end && !hit; l++) hit = tq.re.test(an.lines[l]);
+        if (!hit) an.vis[i] = 0;
       });
     }
   }
@@ -2024,7 +2041,10 @@
 
   function clearFilter() {
     if (!active) return;
-    active.filter = emptyFilter();
+    const old = active.filter || {};
+    active.filter = Object.assign(emptyFilter(), { textCase: !!old.textCase, textRegex: !!old.textRegex });
+    const input = $('#qb-input');
+    if (input) input.value = '';
     setFilter({});
     if (currentView === 'insights') renderInsights();
   }
@@ -2064,7 +2084,6 @@
       chips.push({ key: 'time', val: (f.from ? shortTime(f.from) : 'start') + ' to ' + (f.to ? shortTime(f.to) : 'end'), time: true,
         title: 'Drag on the timeline to change the range. Double-click the timeline, or ×, to clear it.', clear: { from: '', to: '' } });
     }
-    if (f.levels.size !== Logs.LEVEL_CHIPS.length) chips.push({ key: 'level', val: Array.from(f.levels).map((x) => x.toLowerCase()).join(', ') || 'none', clear: { levels: new Set(Logs.LEVEL_CHIPS) } });
     if (f.logger) chips.push({ key: 'logger', val: f.logger, clear: { logger: '' } });
     const ids = filterLines(f.trace);
     if (ids.length) chips.push({ key: 'trace', val: ids.length === 1 ? ids[0] : ids.length + ' IDs', title: ids.join('\n'), clear: { trace: '' } });
@@ -2075,39 +2094,103 @@
     return chips;
   }
 
-  function renderFilterBar() {
-    const bar = $('#filterbar');
-    const box = bar.querySelector('.qb-chips');
-    const input = $('#qb-input');
-    const cnt = bar.querySelector('.qb-count');
-    const clr = bar.querySelector('.qb-clear');
-    const st = $('#st-filter');
-    const log = !!(active && isLogTab(active));
-    const an = log ? active.an : null;
-    const filtering = !!(an && filterActive(active.filter));
-    input.placeholder = !log ? 'Find in this tab, or type > for a command'
-      : filtering ? 'Add a filter…' : 'Filter: level:error  logger:Payment  took>1000  after:10:15  -noise';
+  // ---------- filter row (0.18.1, after tracepad): level chips, text box, More filters, count ----------
+  // Typed text that uses the query syntax (level:, took>, -word, "a phrase", >command) is added on Enter;
+  // anything else filters live as you type.
+  const QUERY_LIKE = /(^|\s)(-\S|[a-z]+(:|>=|>)\S|>)|"/i;
+  const isQueryLike = (v) => QUERY_LIKE.test(v.trim());
+  const LEVEL_NAMES = { ERROR: 'ERROR', WARN: 'WARN', INFO: 'INFO', DEBUG: 'DEBUG', TRACE: 'TRACE', OTHER: 'OTHER' };
+  let moreOpen = false;
+
+  function shownCount(an) { return an.vis ? an.vis.reduce((a, b) => a + b, 0) : an.entries.length; }
+
+  // Level chips: none pressed = every level. Click one to show only it, click others to add them,
+  // click a pressed one to drop it. Shift+click (or double-click) shows only that level.
+  function clickLevel(lvl, only) {
+    const an = active && active.an;
+    if (!an) return;
+    const f = active.filter;
+    const all = f.levels.size === Logs.LEVEL_CHIPS.length;
+    let s;
+    if (only || all) s = all || !(f.levels.size === 1 && f.levels.has(lvl)) ? new Set([lvl]) : new Set(Logs.LEVEL_CHIPS);
+    else { s = new Set(f.levels); if (s.has(lvl)) s.delete(lvl); else s.add(lvl); }
+    const present = Logs.LEVEL_CHIPS.filter((l) => an.counts[l]);
+    if (!s.size || present.every((l) => s.has(l))) s = new Set(Logs.LEVEL_CHIPS);
+    setFilter({ levels: s });
+    if (currentView === 'insights') renderInsights();
+  }
+
+  function renderLevelChips(box, an, f) {
     box.innerHTML = '';
-    if (!filtering) {
-      cnt.hidden = clr.hidden = st.hidden = true;
-      bar.classList.remove('active');
-      return;
+    const all = f.levels.size === Logs.LEVEL_CHIPS.length;
+    for (const lvl of Logs.LEVEL_CHIPS) {
+      const n = an.counts[lvl] || 0;
+      if (!n && (all || !f.levels.has(lvl))) continue;
+      const on = !all && f.levels.has(lvl);
+      const name = LEVEL_NAMES[lvl];
+      box.append(h('button', {
+        class: 'lb-lvl' + (on ? ' on' : !all ? ' off' : ''), 'data-level': lvl, 'aria-pressed': on ? 'true' : 'false',
+        title: all ? 'Show only ' + name + ' (Shift+click to show only one level)' : on ? 'Stop showing ' + name : 'Also show ' + name,
+        onclick: (e) => { if (e.detail > 1) return; clickLevel(lvl, e.shiftKey); },
+        ondblclick: () => clickLevel(lvl, true),
+      }, h('b', null, name), h('span', null, n.toLocaleString())));
     }
-    for (const c of filterChips(active.filter)) {
+  }
+
+  // How many of the filters behind "More filters" are in use.
+  function advancedCount(f) {
+    return [filterLines(f.include).length, filterLines(f.exclude).length, f.logger, filterLines(f.trace).length, f.from || f.to, f.took, f.lines]
+      .filter(Boolean).length;
+  }
+
+  function renderFilterBar() {
+    const logbar = $('#logbar');
+    const bar = $('#filterbar');
+    const log = !!(active && isLogTab(active));
+    const an = log ? analyze(active) : null;
+    logbar.hidden = !an;
+    const st = $('#st-filter');
+    if (!an) { st.hidden = true; return; }
+    const f = active.filter;
+    const input = $('#qb-input');
+    const text = bar.querySelector('.lb-text');
+    const filtering = filterActive(f);
+    renderLevelChips(bar.querySelector('.lb-levels'), an, f);
+    if (document.activeElement !== input) input.value = f.text || '';
+    input.placeholder = 'Filter entries'; // the query syntax (level:error, took>1000…) is listed when the box gets focus
+    for (const b of bar.querySelectorAll('.lb-tog')) b.setAttribute('aria-pressed', f[b.dataset.tog] ? 'true' : 'false');
+    text.classList.toggle('has-text', !!String(f.text || '').trim());
+    text.classList.toggle('has-error', !!an.filterError);
+    text.title = an.filterError ? 'Invalid regex: ' + an.filterError : '';
+    // chips for the filters that have no control of their own in the row
+    const box = bar.querySelector('.qb-chips');
+    box.innerHTML = '';
+    for (const c of filterChips(f)) {
       const chip = h('span', { class: 'qb-chip' + (c.time ? ' time' : ''), title: c.title || '' },
         h('span', { class: 'qb-k' }, c.key + (c.op || ':')), h('b', null, c.val),
         h('button', { class: 'qb-x', title: 'Remove', 'aria-label': 'Remove the ' + c.key + ' filter', onclick: (e) => { e.stopPropagation(); setFilter(c.clear); if (currentView === 'insights') renderInsights(); } }, '×'));
       if (c.time) chip.insertAdjacentHTML('afterbegin', CLOCK_SVG);
       box.append(chip);
     }
-    const shown = an.vis ? an.vis.reduce((a, b) => a + b, 0) : an.entries.length;
+    const more = bar.querySelector('.lb-more');
+    const nAdv = advancedCount(f);
+    more.querySelector('span').textContent = 'More filters' + (nAdv ? ' (' + nAdv + ')' : '');
+    more.classList.toggle('has', !!nAdv);
+    more.setAttribute('aria-expanded', moreOpen ? 'true' : 'false');
+    const shown = shownCount(an);
     const total = an.entries.length.toLocaleString();
-    cnt.textContent = shown.toLocaleString() + ' of ' + total;
-    cnt.title = shown.toLocaleString() + ' of ' + total + ' entries shown';
-    cnt.hidden = clr.hidden = false;
-    bar.classList.add('active');
-    bar.classList.toggle('has-error', !!an.filterError);
+    const cnt = bar.querySelector('.qb-count');
+    cnt.innerHTML = '';
+    if (filtering) cnt.append(h('b', null, shown.toLocaleString()), ' of ' + total + ' entries');
+    else cnt.append(total + ' entries');
+    cnt.classList.toggle('none', filtering && shown === 0);
+    cnt.title = (an.formatLabel || 'Log') + ' log' + (filtering && shown === 0 ? '. Nothing matches, so the full log is shown.' : '');
+    bar.querySelector('.qb-clear').hidden = !filtering;
+    bar.classList.toggle('active', filtering);
+    renderAdvanced();
+    // status bar: the same summary, with Copy shown
     st.innerHTML = '';
+    if (!filtering) { st.hidden = true; return; }
     st.append(...[
       h('span', null, h('b', null, shown.toLocaleString()), ' of ' + total + ' entries shown'),
       an.filterError ? h('span', { class: 'st-err' }, 'Invalid regex: ' + an.filterError) : null,
@@ -2117,6 +2200,93 @@
     st.hidden = false;
   }
 
+  // The fields behind "More filters". Rebuilt only when nothing in it has focus, so typing is never interrupted.
+  function renderAdvanced() {
+    const adv = $('#logbar .lb-advanced');
+    adv.hidden = !moreOpen || !(active && active.an);
+    if (adv.hidden || adv.contains(document.activeElement)) return;
+    const f = active.filter;
+    const later = debounce((key, val) => setFilter({ [key]: val }), 250);
+    const area = (key, placeholder) => { const ta = h('textarea', { rows: 2, spellcheck: false, placeholder, 'data-key': key, oninput: (e) => later(key, e.target.value) }); ta.value = f[key] || ''; return ta; };
+    const input = (key, placeholder, extra) => h('input', Object.assign({ type: 'text', value: f[key] || '', placeholder, spellcheck: false, 'data-key': key, oninput: (e) => later(key, e.target.value) }, extra || {}));
+    const field = (label, ctl, extra) => h('div', { class: 'lb-f' }, h('div', { class: 'lb-fh' }, h('span', null, label), extra || null), ctl);
+    const mode = h('select', { title: 'With several patterns: entries matching any of them, or all of them', onchange: (e) => setFilter({ includeMode: e.target.value }) },
+      h('option', { value: 'any', selected: f.includeMode !== 'all' }, 'any of'), h('option', { value: 'all', selected: f.includeMode === 'all' }, 'all of'));
+    adv.innerHTML = '';
+    adv.append(
+      field('Lines matching', area('include', 'One pattern per line, text or regex'), mode),
+      field('Hide lines matching', area('exclude', 'HealthCheck\nactuator')),
+      h('div', { class: 'lb-f' },
+        field('Logger or thread', input('logger', 'e.g. PaymentClient or exec-3')),
+        field('Took at least (ms)', input('took', 'e.g. 1000', { inputmode: 'numeric' }))),
+      h('div', { class: 'lb-f' },
+        field('Trace IDs', area('trace', 'One ID per line')),
+        h('div', { class: 'lb-two' },
+          field('From', input('from', '10:15 or drag')),
+          field('To', input('to', '10:20')))),
+    );
+  }
+
+  function wireFilterRow() {
+    const bar = $('#filterbar');
+    const input = $('#qb-input');
+    const text = bar.querySelector('.lb-text');
+    const help = bar.querySelector('.qb-help');
+    const showHelp = (on) => {
+      if (on && !help.childElementCount) {
+        help.append(h('div', { class: 'qb-help-head' }, 'Type to filter as you go, or use these and press Enter. Each one becomes a chip.'));
+        for (const [ex, what] of QB_EXAMPLES) {
+          help.append(h('button', { class: 'qb-ex', onmousedown: (e) => { e.preventDefault(); input.value = (input.value ? input.value + ' ' : '') + ex.replace(/^> /, '>'); input.focus(); } }, h('code', null, ex), h('span', null, what)));
+        }
+      }
+      help.hidden = !on;
+    };
+    const live = debounce(() => {
+      if (!active || !isLogTab(active)) return;
+      const v = input.value;
+      if (isQueryLike(v)) return; // wait for Enter
+      if ((active.filter.text || '') !== v) setFilter({ text: v });
+    }, 160);
+    input.addEventListener('focus', () => { text.classList.add('focus'); showHelp(!input.value); });
+    input.addEventListener('blur', () => { text.classList.remove('focus'); showHelp(false); });
+    input.addEventListener('input', () => { showHelp(!input.value); live(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const v = input.value;
+        if (isQueryLike(v)) {
+          if (active && active.filter.text) setFilter({ text: '' });
+          const bad = applyQuery(v);
+          input.value = bad.join(' '); // keep only what was not understood, so it can be corrected
+        } else if (active && (active.filter.text || '') !== v) setFilter({ text: v });
+        showHelp(false);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (input.value) { input.value = ''; if (active && active.filter.text) setFilter({ text: '' }); }
+        else { input.blur(); editor.focus(); }
+      } else if (e.key === 'Backspace' && !input.value && active && isLogTab(active)) {
+        const chips = filterChips(active.filter);
+        if (chips.length) { e.preventDefault(); setFilter(chips[chips.length - 1].clear); if (currentView === 'insights') renderInsights(); }
+      }
+    });
+    text.addEventListener('mousedown', (e) => { if (!e.target.closest('button') && e.target !== input) { e.preventDefault(); input.focus(); } });
+    for (const b of bar.querySelectorAll('.lb-tog')) {
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', () => { if (active) setFilter({ [b.dataset.tog]: !active.filter[b.dataset.tog] }); });
+    }
+    bar.querySelector('.qb-clear').onclick = () => { clearFilter(); };
+    bar.querySelector('.lb-more').onclick = () => { moreOpen = !moreOpen; renderFilterBar(); if (moreOpen) { const first = $('#logbar .lb-advanced textarea'); if (first) first.focus(); } };
+    bar.querySelector('.lb-auto').onclick = () => { extractState.preset = 'auto'; if (currentView === 'extract') renderExtract(); runAutoTables(); };
+    bar.querySelector('.lb-prev').onclick = () => jumpError(-1);
+    bar.querySelector('.lb-next').onclick = () => jumpError(1);
+  }
+  // Ctrl+K: the filter box for logs; the editor's find box for other files.
+  function focusQueryBar() {
+    if (active && isLogTab(active) && !$('#logbar').hidden) { const i = $('#qb-input'); i.focus(); i.select(); return; }
+    editor.focus();
+    editor.trigger('tf', 'actions.find');
+  }
   // Typed text -> filter changes. Returns the parts it could not understand.
   function applyQuery(text) {
     const q = text.trim();
@@ -2181,41 +2351,6 @@
     ['trace:c3e09f1a', 'one request across the log'], ['after:10:15 before:10:17', 'a time range'], ['took>1000', 'calls that took 1 s or more'],
     ['-healthcheck', 'hide entries with a word'], ['re:timed? ?out', 'a regular expression'], ['> split', 'run a command'],
   ];
-  function wireQueryBar() {
-    const bar = $('#filterbar');
-    const input = $('#qb-input');
-    const help = bar.querySelector('.qb-help');
-    const showHelp = (on) => {
-      if (on && !help.childElementCount) {
-        help.append(h('div', { class: 'qb-help-head' }, 'Type a filter and press Enter. Each part becomes a chip.'));
-        for (const [ex, what] of QB_EXAMPLES) {
-          help.append(h('button', { class: 'qb-ex', onmousedown: (e) => { e.preventDefault(); input.value = (input.value ? input.value + ' ' : '') + ex.replace(/^> /, '>'); input.focus(); } }, h('code', null, ex), h('span', null, what)));
-        }
-      }
-      help.hidden = !on || !(active && isLogTab(active));
-    };
-    input.addEventListener('focus', () => { bar.classList.add('focus'); showHelp(!input.value); });
-    input.addEventListener('blur', () => { bar.classList.remove('focus'); showHelp(false); });
-    input.addEventListener('input', () => showHelp(!input.value));
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const bad = applyQuery(input.value);
-        input.value = bad.join(' '); // keep only what was not understood, so it can be corrected
-        showHelp(false);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        if (input.value) input.value = ''; else { input.blur(); editor.focus(); }
-      } else if (e.key === 'Backspace' && !input.value && active && isLogTab(active)) {
-        const chips = filterChips(active.filter);
-        if (chips.length) { e.preventDefault(); setFilter(chips[chips.length - 1].clear); if (currentView === 'insights') renderInsights(); }
-      }
-    });
-    bar.addEventListener('mousedown', (e) => { if (!e.target.closest('button') && e.target !== input) { e.preventDefault(); input.focus(); } });
-    bar.querySelector('.qb-clear').onclick = () => { clearFilter(); input.focus(); };
-  }
-  function focusQueryBar() { const i = $('#qb-input'); i.focus(); i.select(); }
-
   // ---------- decorations ----------
   function refreshDecorations(tab) {
     if (!tab || !tabs.includes(tab)) return;
@@ -2259,132 +2394,144 @@
     tab.decoVersion = tab.model.getVersionId();
   }
 
-  // ---------- signal strip ----------
-  // "4 errors" / "3 warnings": one click shows only that level, a second click shows everything again.
-  function levelPill(level, n, word, cls) {
-    const f = active.filter;
-    const on = f.levels.size === 1 && f.levels.has(level);
-    const stop = (e) => e.stopPropagation();
-    return h('button', {
-      class: 'sig-pill ' + cls + (on ? ' on' : ''), 'aria-pressed': on ? 'true' : 'false',
-      title: on ? 'Show all levels again' : 'Show only ' + word + 's',
-      onpointerdown: stop, ondblclick: stop,
-      onclick: (e) => { stop(e); setFilter({ levels: on ? new Set(Logs.LEVEL_CHIPS) : new Set([level]) }); if (currentView === 'insights') renderInsights(); },
-    }, n + ' ' + word + (n === 1 ? '' : 's'));
+  // ---------- timeline strip (0.18.1, after tracepad) ----------
+  // One bar per time slice: all entries in grey, warnings and errors on top. Bars the filter hides are dimmed,
+  // the chosen time range is outlined. Click a bar to jump there, drag to filter by time, double-click to clear.
+  const TL_HINT = 'Click a bar to jump there · drag to filter by time';
+  const TL_HINT_RANGE = 'Showing the selected time range · double-click to clear';
+  function timelineHint(text) {
+    const el = $('#logbar .lb-hint');
+    if (!el) return;
+    const f = active && active.filter;
+    el.textContent = text || (f && (f.from || f.to) ? TL_HINT_RANGE : TL_HINT);
+    el.classList.toggle('live', !!text);
+  }
+  // Bars for the strip, sized to its width like tracepad: one bar per ~7 px (12 to 180 bars), the log's time
+  // span split evenly between them. Cached per analysis, filter and bar count.
+  function stripBuckets(an) {
+    const tl = an && an.timeline;
+    const box = $('#signal');
+    if (!tl || !box) return null;
+    const width = box.clientWidth || box.parentElement.clientWidth || 0;
+    const count = Math.max(12, Math.min(180, Math.floor(width / 7)));
+    const c = an.strip;
+    if (c && c.count === count && c.vis === an.vis) return c;
+    const lo = tl.min, hi = tl.max;
+    const size = Math.max(1, hi - lo) / count;
+    const buckets = Array.from({ length: count }, (_, k) => ({ start: lo + k * size, end: lo + (k + 1) * size, total: 0, warn: 0, error: 0, shown: 0, first: -1, firstErr: -1, firstVis: -1, firstVisErr: -1 }));
+    an.entries.forEach((e, i) => {
+      if (e.ts == null || e.ts < lo) return;
+      const bk = buckets[Math.min(count - 1, Math.floor((e.ts - lo) / size))];
+      const vis = !an.vis || an.vis[i];
+      bk.total++;
+      if (bk.first < 0) bk.first = i;
+      if (vis) { bk.shown++; if (bk.firstVis < 0) bk.firstVis = i; }
+      if (e.level === 'ERROR') { bk.error++; if (bk.firstErr < 0) bk.firstErr = i; if (vis && bk.firstVisErr < 0) bk.firstVisErr = i; }
+      else if (e.level === 'WARN') bk.warn++;
+    });
+    an.strip = { count, vis: an.vis, lo, hi: lo + count * size, size, buckets };
+    return an.strip;
+  }
+  // The selected time range in ms, or null.
+  function selectedRange(an) {
+    const f = active && active.filter;
+    if (!f || (!f.from && !f.to)) return null;
+    const ref = an.entries.find((e) => e.ts != null);
+    const a = f.from ? Logs.parseTimeInput(f.from, ref ? ref.ts : null) : -Infinity;
+    let b = f.to ? Logs.parseTimeInput(f.to, ref ? ref.ts : null) : Infinity;
+    if (a == null || b == null) return null;
+    if (f.to && /^\d{1,2}:\d{2}$/.test(f.to.trim())) b += 59999;
+    else if (f.to && /:\d{2}:\d{2}$/.test(f.to.trim())) b += 999;
+    return { a, b };
   }
   function renderSignal() {
+    const tlBox = $('#logbar .lb-timeline');
     const box = $('#signal');
     const an = active && isLogTab(active) ? active.an : null;
-    if (!settings.signal || !an) { box.hidden = true; return; }
-    box.hidden = false;
-    const meta = box.querySelector('.signal-meta');
-    const tl = an.timeline;
-    meta.innerHTML = '';
-    meta.append(
-      h('span', null, an.formatLabel || 'Log'),
-      h('span', null, an.entries.length.toLocaleString() + ' entries'),
-      levelPill('ERROR', an.counts.ERROR, 'error', 'e'),
-      levelPill('WARN', an.counts.WARN, 'warning', 'w'),
-      h('span', { class: 'grow' }),
-      tl ? h('span', null, Logs.formatTs(tl.min, true) + '  to  ' + Logs.formatTs(tl.max) + '   (' + Logs.formatDuration(tl.max - tl.min) + ', bars of ' + Logs.formatDuration(tl.size) + ')') : h('span', null, 'No timestamps found'));
-    const svg = $('#signal-svg');
-    svg.innerHTML = '';
-    renderSignalRange(tl);
-    if (!tl) return;
-    const n = tl.buckets.length;
-    const max = Math.max(1, ...tl.buckets.map((b) => b.total));
-    svg.setAttribute('viewBox', `0 0 ${n} 100`);
-    const pal = palette();
-    const acc = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
-    const y = (v) => 100 - (v / max) * 92;
-    let d = `M0 100`;
-    tl.buckets.forEach((b, i) => { d += ` L${i} ${y(b.total)} L${i + 1} ${y(b.total)}`; });
-    d += ` L${n} 100 Z`;
-    const ns = 'http://www.w3.org/2000/svg';
-    const path = document.createElementNS(ns, 'path');
-    path.setAttribute('d', d);
-    path.setAttribute('fill', acc + '30');
-    path.setAttribute('stroke', acc);
-    path.setAttribute('stroke-width', '1.2');
-    path.setAttribute('vector-effect', 'non-scaling-stroke');
-    svg.appendChild(path);
-    tl.buckets.forEach((b, i) => {
-      const bar = (count, color, offset) => {
-        if (!count) return;
-        const r = document.createElementNS(ns, 'rect');
-        const hgt = Math.max(8, (count / max) * 92);
-        r.setAttribute('x', i + 0.18);
-        r.setAttribute('width', 0.64);
-        r.setAttribute('y', 100 - hgt - offset);
-        r.setAttribute('height', hgt);
-        r.setAttribute('fill', color);
-        svg.appendChild(r);
-        return hgt;
-      };
-      const eh = bar(b.error, pal.err, 0) || 0;
-      bar(b.warn, pal.warn, eh);
-    });
-    if (an.vis && active.filter) {
-      // dim time ranges that the filter hides entirely
-      const visTl = Logs.timeline(an.entries, 90, an.vis);
-      if (visTl) {
-        tl.buckets.forEach((b, i) => {
-          const inVis = visTl.buckets.some((vb) => vb.total && vb.start < b.start + tl.size && vb.start + visTl.size > b.start);
-          if (inVis) return;
-          const r = document.createElementNS(ns, 'rect');
-          r.setAttribute('x', i); r.setAttribute('width', 1); r.setAttribute('y', 0); r.setAttribute('height', 100);
-          r.setAttribute('fill', getComputedStyle(document.documentElement).getPropertyValue('--editor').trim() + 'b0');
-          svg.appendChild(r);
-        });
-      }
+    const tl = an ? an.timeline : null;
+    $('#logbar').hidden = !an; // shown before measuring the strip's width
+    tlBox.hidden = !settings.signal || !an;
+    if (tlBox.hidden) return;
+    const start = tlBox.querySelector('.lb-start'), end = tlBox.querySelector('.lb-end');
+    let bars = box.querySelector('.lb-bars');
+    if (!bars) { bars = h('div', { class: 'lb-bars' }); box.prepend(bars); }
+    bars.innerHTML = '';
+    box.hidden = !tl;
+    if (!tl) {
+      start.textContent = 'No timestamps found in this log';
+      end.textContent = '';
+      $('#logbar .lb-hint').textContent = '';
+      renderSignalRange(null);
+      return;
     }
+    const st = stripBuckets(an);
+    start.textContent = Logs.formatTs(st.lo, true);
+    end.textContent = Logs.formatTs(st.hi, true);
+    end.title = Logs.formatDuration(tl.max - tl.min) + ' in ' + st.count + ' bars of ' + Logs.formatDuration(Math.max(1, Math.round(st.size)));
+    timelineHint();
+    const max = Math.max(1, ...st.buckets.map((b) => b.total));
+    const pct = (v) => (v ? Math.max(8, Math.sqrt(v / max) * 100).toFixed(1) + '%' : '0');
+    const sel = selectedRange(an);
+    const frag = document.createDocumentFragment();
+    st.buckets.forEach((b) => {
+      const outside = sel && (b.end <= sel.a || b.start > sel.b);
+      const bar = h('div', { class: 'lb-bar' + (outside ? ' dim' : '') });
+      bar.append(h('i', { class: 'all', style: 'height:' + pct(b.total) }));
+      if (b.warn + b.error) bar.append(h('i', { class: 'warn', style: 'height:' + pct(b.warn + b.error) }));
+      if (b.error) bar.append(h('i', { class: 'error', style: 'height:' + pct(b.error) }));
+      frag.append(bar);
+    });
+    bars.append(frag);
+    renderSignalRange(st);
   }
 
-  // The time range from the filter, shaded on the strip (everything outside it is dimmed).
-  function renderSignalRange(tl) {
+  // The time range from the filter, outlined on the strip.
+  function renderSignalRange(st) {
     const box = $('#signal');
     let shade = box.querySelector('.range');
-    if (!shade) { shade = h('div', { class: 'range', hidden: true }, h('i', { class: 'l' }), h('i', { class: 'r' })); box.append(shade); }
-    const f = active && active.filter;
-    if (!tl || !f || (!f.from && !f.to)) { shade.hidden = true; return; }
-    const an = active.an;
-    const ref = an.entries.find((e) => e.ts != null);
-    const start = tl.buckets[0].start, span = tl.buckets.length * tl.size;
-    let a = f.from ? Logs.parseTimeInput(f.from, ref ? ref.ts : null) : start;
-    let b = f.to ? Logs.parseTimeInput(f.to, ref ? ref.ts : null) : start + span;
-    if (f.to && /^\d{1,2}:\d{2}$/.test(f.to.trim())) b += 59999;
-    if (a == null || b == null) { shade.hidden = true; return; }
-    const pa = Math.max(0, Math.min(1, (a - start) / span)), pb = Math.max(0, Math.min(1, (b - start) / span));
+    if (!shade) { shade = h('div', { class: 'range', hidden: true }); box.append(shade); }
+    const sel = st ? selectedRange(active.an) : null;
+    if (!sel) { shade.hidden = true; return; }
+    const span = st.hi - st.lo;
+    const pa = Math.max(0, Math.min(1, (sel.a - st.lo) / span)), pb = Math.max(0, Math.min(1, (sel.b - st.lo) / span));
     shade.hidden = false;
-    shade.querySelector('.l').style.width = (pa * 100) + '%';
-    shade.querySelector('.r').style.width = ((1 - pb) * 100) + '%';
+    shade.style.left = (pa * 100) + '%';
+    shade.style.width = (Math.max(0, pb - pa) * 100) + '%';
   }
 
   function signalBucketAt(clientX) {
     const an = active && active.an;
-    if (!an || !an.timeline) return null;
+    const st = an ? stripBuckets(an) : null;
+    if (!st) return null;
     const rect = $('#signal').getBoundingClientRect();
-    const n = an.timeline.buckets.length;
+    const n = st.buckets.length;
     const i = Math.min(n - 1, Math.max(0, Math.floor(((clientX - rect.left) / rect.width) * n)));
-    return { i, b: an.timeline.buckets[i], x: clientX - rect.left, tl: an.timeline };
+    return { i, b: st.buckets[i], x: clientX - rect.left, st };
   }
 
   function wireSignal() {
     const box = $('#signal');
-    const cursor = h('div', { class: 'cursor', hidden: true });
-    const tip = h('div', { class: 'tip', hidden: true });
-    box.append(cursor, tip);
+    let hoverEl = null;
+    const setHover = (i) => {
+      const el = i == null ? null : box.querySelectorAll('.lb-bar')[i] || null;
+      if (el === hoverEl) return;
+      if (hoverEl) hoverEl.classList.remove('hover');
+      hoverEl = el;
+      if (el) el.classList.add('hover');
+    };
+    const describe = (r) => {
+      const shown = active.an.vis ? r.b.shown : null;
+      return Logs.formatTs(r.b.start) + ' – ' + Logs.formatTs(r.b.end) + '  ·  ' + r.b.total + ' entr' + (r.b.total === 1 ? 'y' : 'ies') +
+        (shown != null ? ' (' + shown + ' shown)' : '') + (r.b.error ? ', ' + r.b.error + ' error' + (r.b.error === 1 ? '' : 's') : '') + (r.b.warn ? ', ' + r.b.warn + ' warning' + (r.b.warn === 1 ? '' : 's') : '');
+    };
     box.addEventListener('mousemove', (e) => {
+      if (drag && drag.moved) return;
       const r = signalBucketAt(e.clientX);
       if (!r) return;
-      cursor.hidden = tip.hidden = false;
-      cursor.style.left = r.x + 'px';
-      const flip = r.x > box.clientWidth - 260;
-      tip.style.left = r.x + 'px';
-      tip.style.transform = flip ? 'translateX(calc(-100% - 8px))' : 'translateX(8px)';
-      tip.textContent = Logs.formatTs(r.b.start) + '  ' + r.b.total + ' entries' + (r.b.error ? ', ' + r.b.error + ' errors' : '') + (r.b.warn ? ', ' + r.b.warn + ' warnings' : '');
+      setHover(r.i);
+      timelineHint(describe(r));
     });
-    box.addEventListener('mouseleave', () => { cursor.hidden = tip.hidden = true; });
+    box.addEventListener('mouseleave', () => { if (drag && drag.moved) return; setHover(null); timelineHint(); });
     // Drag across the strip to show only that time range; double-click clears it.
     const band = h('div', { class: 'drag', hidden: true });
     box.append(band);
@@ -2396,17 +2543,14 @@
     box.addEventListener('pointermove', (e) => {
       if (!drag) return;
       if (!drag.moved && Math.abs(e.clientX - drag.x0) < 5) return;
-      if (!drag.moved) { drag.moved = true; box.setPointerCapture(drag.id); box.classList.add('dragging'); }
+      if (!drag.moved) { drag.moved = true; box.setPointerCapture(drag.id); box.classList.add('dragging'); setHover(null); }
       const rect = box.getBoundingClientRect();
       const a = Math.max(rect.left, Math.min(drag.x0, e.clientX)), b = Math.min(rect.right, Math.max(drag.x0, e.clientX));
       band.hidden = false;
       band.style.left = (a - rect.left) + 'px';
       band.style.width = (b - a) + 'px';
       const ra = signalBucketAt(a), rb = signalBucketAt(b - 1);
-      if (ra && rb) {
-        tip.hidden = false;
-        tip.textContent = Logs.formatTs(ra.b.start) + '  to  ' + Logs.formatTs(rb.b.start + rb.tl.size);
-      }
+      if (ra && rb) timelineHint(Logs.formatTs(ra.b.start) + ' – ' + Logs.formatTs(rb.b.end) + '  ·  release to filter');
     });
     const endDrag = (e) => {
       if (!drag) return;
@@ -2415,36 +2559,33 @@
       box.classList.remove('dragging');
       band.hidden = true;
       if (!d.moved) return;
-      d.consumed = true;
       suppressClick = true;
       const rect = box.getBoundingClientRect();
       const a = Math.max(rect.left, Math.min(d.x0, e.clientX)), b = Math.min(rect.right, Math.max(d.x0, e.clientX));
       const ra = signalBucketAt(a), rb = signalBucketAt(b - 1);
-      if (!ra || !rb) return;
-      const from = ra.b.start;
-      const to = Math.ceil((rb.b.start + rb.tl.size) / 1000) * 1000 - 1;
-      setFilter({ from: Logs.formatTs(Math.floor(from / 1000) * 1000, true), to: Logs.formatTs(to, true) });
-      toast('Showing ' + Logs.formatTs(from) + ' to ' + Logs.formatTs(to + 1) + '. Double-click the strip to show all times again.', 3500);
+      if (!ra || !rb) { timelineHint(); return; }
+      // whole seconds; "to" covers its whole second. One-day logs get short times (10:15:35), longer logs keep the date.
+      const from = Math.floor(ra.b.start / 1000) * 1000;
+      const to = Math.floor(rb.b.end / 1000) * 1000;
+      const oneDay = Logs.formatTs(ra.st.lo, true).slice(0, 10) === Logs.formatTs(ra.st.hi, true).slice(0, 10);
+      setFilter({ from: Logs.formatTs(from, !oneDay), to: Logs.formatTs(to, !oneDay) });
+      timelineHint();
     };
     let suppressClick = false;
     box.addEventListener('pointerup', endDrag);
-    box.addEventListener('pointercancel', () => { drag = null; band.hidden = true; box.classList.remove('dragging'); });
+    box.addEventListener('pointercancel', () => { drag = null; band.hidden = true; box.classList.remove('dragging'); timelineHint(); });
     box.addEventListener('dblclick', () => {
       if (!active || !active.filter || (!active.filter.from && !active.filter.to)) return;
       setFilter({ from: '', to: '' });
-      toast('Showing all times.', 1800);
+      timelineHint();
     });
     box.addEventListener('click', (e) => {
       if (suppressClick) { suppressClick = false; return; }
       const r = signalBucketAt(e.clientX);
       if (!r || r.b.first < 0) return;
-      const an = active.an;
-      let idx = r.b.first;
-      // prefer the first error in that bucket, then first visible entry
-      for (let i = r.b.first; i < an.entries.length && an.entries[i].ts != null && an.entries[i].ts < r.b.start + r.tl.size; i++) {
-        if (an.entries[i].level === 'ERROR' && (!an.vis || an.vis[i])) { idx = i; break; }
-      }
-      revealEntry(idx);
+      // the first error in that bar (one the filter shows, if any), else its first shown entry
+      const b = r.b;
+      revealEntry([b.firstVisErr, b.firstVis, b.firstErr, b.first].find((x) => x >= 0));
     });
   }
 
@@ -2453,7 +2594,8 @@
     if (!an || !an.entries[idx]) return;
     if (an.vis && !an.vis[idx]) { toast('That entry is hidden by the filter. Clear the filter to see it.'); }
     const ln = an.entries[idx].start + 1;
-    editor.setSelection(new monaco.Range(ln, 1, ln, an.lines[ln - 1].length + 1));
+    // the whole line is selected with the cursor at its start, so the time and level stay in view (not the end of a long line)
+    editor.setSelection(new monaco.Selection(ln, an.lines[ln - 1].length + 1, ln, 1));
     editor.revealLineInCenter(ln);
     editor.focus();
   }
@@ -2632,56 +2774,40 @@
   }
 
   // ---------- insights ----------
+  // Log insights (0.18.1, after tracepad): summary, levels, stack frames, repeated errors. Filters live in the log bar.
+  const LEVEL_ROWS = ['ERROR', 'WARN', 'INFO', 'DEBUG', 'TRACE', 'OTHER'];
+  function spanText(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return 'under a second';
+    const s = Math.round(ms / 1000);
+    if (s < 60) return s + ' s';
+    if (s < 3600) return Math.floor(s / 60) + ' min ' + (s % 60) + ' s';
+    if (s < 86400) return Math.floor(s / 3600) + ' h ' + Math.floor((s % 3600) / 60) + ' min';
+    return Math.floor(s / 86400) + ' d ' + Math.floor((s % 86400) / 3600) + ' h';
+  }
   function renderInsights() {
     const v = view('insights');
     v.innerHTML = '';
     if (!active) return;
     if (!isLogTab(active)) {
-      v.append(h('div', { class: 'empty' },
-        h('p', null, 'This tab isn\'t recognised as a log, so log tools are off.'),
-        h('p', { class: 'hint' }, 'Open a .log file or paste log lines into an empty tab and they are detected automatically. Spring Boot, Logback/Log4j, JSON, access logs and syslog are supported.'),
+      v.append(h('section', { class: 'ins-sec' },
+        h('p', { class: 'hint' }, active.name + ' is not being treated as a log. TextForge looks for lines that start with a timestamp (Spring Boot, Logback/Log4j, JSON lines, access logs, syslog and others).'),
         h('button', { class: 'primary', onclick: () => { treatAsLog(active); renderInsights(); } }, 'Treat this tab as a log')));
       return;
     }
-    const f = active.filter;
-    const filterInput = (key, label, placeholder, mono) => h('div', { class: 'field' },
-      h('label', null, label),
-      h('input', { type: 'text', value: f[key], placeholder, spellcheck: false, style: mono ? 'font-family:var(--mono);font-size:12px' : null,
-        oninput: debounce((e) => setFilter({ [key]: e.target.value }), 250) }));
-    // Multi-line box: one pattern per line; grows with its content.
-    const grow = (ta) => { ta.style.height = 'auto'; ta.style.height = Math.min(220, ta.scrollHeight + 2) + 'px'; };
-    const filterLinesBox = (key, label, placeholder, extra) => {
-      const ta = h('textarea', { id: 'flt-' + key, class: 'flt-lines', rows: 2, spellcheck: false, placeholder,
-        oninput: (e) => { grow(e.target); setLater(key, e.target.value); } });
-      ta.value = f[key] || '';
-      setTimeout(() => grow(ta), 0);
-      return h('div', { class: 'field' }, h('div', { class: 'row', style: 'justify-content:space-between' }, h('label', { for: 'flt-' + key }, label), extra || null), ta);
-    };
-    const setLater = debounce((key, val) => setFilter({ [key]: val }), 250);
-    const modeSel = h('select', { class: 'mini', title: 'With several lines: show entries matching any line, or all of them',
-      onchange: (e) => setFilter({ includeMode: e.target.value }) },
-      h('option', { value: 'any', selected: f.includeMode !== 'all' }, 'any line'),
-      h('option', { value: 'all', selected: f.includeMode === 'all' }, 'all lines'));
-
+    const pk = h('input', { type: 'text', class: 'ins-input', value: settings.myPackages, spellcheck: false, autocomplete: 'off', placeholder: 'com.mycompany',
+      oninput: debounce((e) => { settings.myPackages = e.target.value; saveSettings(); tabs.forEach((t) => { if (isLogTab(t)) { t.an = null; analyze(t); } refreshDecorations(t); }); onActiveAnalysisChanged(); updateInsights(); }, 400) });
     v.append(
-      h('div', { class: 'group' }, h('div', { id: 'ins-summary' })),
-      h('div', { class: 'group' }, h('h3', null, 'Show levels'), h('div', { class: 'chips', id: 'ins-chips' })),
-      h('div', { class: 'group' },
-        h('h3', null, 'Filter'),
-        h('p', { class: 'hint', style: 'margin-top:0' }, 'One pattern per line (press Enter for the next). Regex works too.'),
-        filterLinesBox('include', 'Lines matching', 'orderId=90005\nSocketTimeout\nCRITICAL', h('span', { class: 'row', style: 'gap:6px;font-size:12px;color:var(--muted)' }, 'match', modeSel)),
-        filterLinesBox('exclude', 'Hide lines matching', 'HealthCheck\nactuator'),
-        filterInput('logger', 'Logger or thread contains', 'e.g. PaymentClient or exec-3'),
-        filterLinesBox('trace', 'Trace / request IDs', 'One ID per line, or right-click an ID in the log'),
-        h('div', { class: 'row' }, filterInput('from', 'From', '10:15 or 2026-11-02 10:15'), filterInput('to', 'To', '10:20')),
-        h('button', { onclick: clearFilter }, 'Clear filter')),
-      h('div', { class: 'group' },
-        h('h3', null, 'Repeated errors ', h('span', { class: 'count', id: 'ins-gcount' })),
-        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: settings.groupWarn,
-          onchange: (e) => { settings.groupWarn = e.target.checked; saveSettings(); analyze(active); updateInsights(); } }), 'Include warnings'),
-        h('div', { class: 'err-list', id: 'ins-groups' })),
-      h('div', { class: 'group' },
-        h('h3', null, 'Tools'),
+      h('section', { class: 'ins-sec' }, h('h3', null, 'Summary'), h('dl', { class: 'ins-keys', id: 'ins-summary' })),
+      h('section', { class: 'ins-sec' }, h('h3', null, 'Levels'), h('div', { class: 'ins-levels', id: 'ins-levels' })),
+      h('section', { class: 'ins-sec' }, h('h3', null, 'Stack frames'),
+        h('label', { class: 'ins-field' }, h('span', null, 'Your package prefix (its frames are highlighted, the rest dimmed)'), pk),
+        h('p', { class: 'hint small' }, 'Several prefixes: separate them with commas. Left empty, frames from common libraries (java., org.springframework., org.apache.…) are dimmed.')),
+      h('section', { class: 'ins-sec' },
+        h('h3', { class: 'ins-h-row' }, h('span', { id: 'ins-gtitle' }, 'Repeated errors'),
+          h('label', { class: 'ins-check', title: 'Group warnings too' }, h('input', { type: 'checkbox', checked: settings.groupWarn,
+            onchange: (e) => { settings.groupWarn = e.target.checked; saveSettings(); analyze(active); updateInsights(); } }), 'warnings')),
+        h('ul', { class: 'ins-groups', id: 'ins-groups', role: 'list' })),
+      h('section', { class: 'ins-sec' }, h('h3', null, 'Tools'),
         h('div', { class: 'row wrap' },
           h('button', { onclick: () => editor.trigger('tf', 'editor.foldAll') }, 'Fold stack traces'),
           h('button', { onclick: () => editor.trigger('tf', 'editor.unfoldAll') }, 'Unfold all'),
@@ -2694,52 +2820,49 @@
   function updateInsights() {
     if (currentView !== 'insights' || !active || !isLogTab(active) || !$('#ins-summary')) { if (currentView === 'insights' && !$('#ins-summary')) renderInsights(); return; }
     const an = analyze(active);
-    const shown = an.vis ? an.vis.reduce((a, b) => a + b, 0) : an.entries.length;
     const tl = an.timeline;
+    const row = (k, val) => h('div', { class: 'ins-row' }, h('dt', null, k), h('dd', null, val));
     const sum = $('#ins-summary');
     sum.innerHTML = '';
-    sum.append(
-      h('p', { class: 'hint', style: 'margin-top:0' }, (an.formatLabel || 'Generic') + ' log' + (an.vis ? ', ' + shown + ' entries match the filter' : '')),
-      h('div', { class: 'summary' },
-        h('div', { class: 'is-err' }, h('b', null, an.counts.ERROR), h('span', null, 'errors')),
-        h('div', { class: 'is-warn' }, h('b', null, an.counts.WARN), h('span', null, 'warnings')),
-        h('div', null, h('b', null, an.entries.length.toLocaleString()), h('span', null, 'entries')),
-        h('div', null, h('b', null, tl ? Logs.formatDuration(tl.max - tl.min) : 'n/a'), h('span', null, tl ? 'from ' + Logs.formatTs(tl.min) : 'time span'))));
-    const chips = $('#ins-chips');
-    chips.innerHTML = '';
-    for (const lvl of Logs.LEVEL_CHIPS) {
-      const on = active.filter.levels.has(lvl);
-      chips.append(h('button', {
-        class: 'chip ' + (on ? 'on' : 'off'), 'data-level': lvl, title: 'Click to toggle, double-click to show only ' + lvl.toLowerCase(),
-        onclick: (e) => {
-          if (e.detail > 1) return;
-          const s = new Set(active.filter.levels);
-          if (s.has(lvl)) s.delete(lvl); else s.add(lvl);
-          setFilter({ levels: s });
-        },
-        ondblclick: () => setFilter({ levels: new Set([lvl]) }),
-      }, h('i'), lvl === 'OTHER' ? 'Other' : lvl[0] + lvl.slice(1).toLowerCase(), h('b', null, an.counts[lvl])));
+    sum.append(row('Format', an.formatLabel || 'Generic'),
+      row('Entries', an.entries.length.toLocaleString() + ' in ' + an.lines.length.toLocaleString() + ' lines'));
+    if (tl) sum.append(row('From', Logs.formatTs(tl.min, true)), row('To', Logs.formatTs(tl.max, true)), row('Covers', spanText(tl.max - tl.min)));
+    const lv = $('#ins-levels');
+    lv.innerHTML = '';
+    const max = Math.max(1, ...LEVEL_ROWS.map((l) => an.counts[l] || 0));
+    for (const l of LEVEL_ROWS) {
+      const n = an.counts[l] || 0;
+      if (!n) continue;
+      lv.append(h('div', { class: 'ins-level', 'data-level': l },
+        h('span', { class: 'ins-lname' }, l),
+        h('span', { class: 'ins-track' }, h('i', { style: 'width:' + Math.max(2, (n / max) * 100) + '%' })),
+        h('span', { class: 'ins-lcount' }, n.toLocaleString())));
     }
+    $('#ins-gtitle').textContent = settings.groupWarn ? 'Repeated errors and warnings' : 'Repeated errors';
     const list = $('#ins-groups');
     list.innerHTML = '';
-    $('#ins-gcount').textContent = an.groups.length ? an.groups.length + ' kinds' : '';
-    if (!an.groups.length) list.append(h('p', { class: 'hint' }, 'No errors in this log.'));
+    if (!an.groups.length) list.append(h('li', { class: 'hint' }, settings.groupWarn ? 'No errors or warnings in this log.' : 'No errors in this log.'));
+    // Click steps through the occurrences, starting after the cursor.
+    const visit = (g) => {
+      const at = (editor.getPosition() || { lineNumber: 1 }).lineNumber - 1;
+      const next = g.entries.find((i) => an.entries[i].start > at);
+      revealEntry(next != null ? next : g.entries[0]);
+    };
     an.groups.slice(0, 60).forEach((g) => {
-      let k = 0;
-      const item = h('button', {
-        class: 'err-item' + (g.level === 'WARN' ? ' warn' : ''),
-        title: 'Click to jump through occurrences',
-        onclick: () => { revealEntry(g.entries[k % g.entries.length]); k++; },
-      },
-      h('div', { class: 'top' }, h('span', { class: 'title' }, g.title), h('span', { class: 'n' }, g.count + '×')),
-      h('div', { class: 'msg' }, g.sample),
-      g.frame ? h('div', { class: 'where' }, 'at ' + g.frame) : null,
-      g.firstTs != null ? h('div', { class: 'msg' }, g.count > 1 && g.lastTs !== g.firstTs ? 'first ' + Logs.formatTs(g.firstTs) + ', last ' + Logs.formatTs(g.lastTs) : 'at ' + Logs.formatTs(g.firstTs)) : null,
-      g.rootCause && g.rootCause.split('.').pop() !== g.title ? h('div', { class: 'msg' }, 'Root cause: ' + g.rootCause) : null);
-      const ask = h('button', { class: 'ghost', style: 'font-size:11.5px;padding:1px 6px;margin-top:4px',
+      const exc = g.title && g.title !== g.sample ? g.title.split('.').pop() : '';
+      const ask = h('button', { class: 'ins-ask', title: 'Ask Copilot to explain this error',
         onclick: (e) => { e.stopPropagation(); const en = an.entries[g.entries[0]]; askCopilot('explain', Logs.entryText(an.lines, en, 80), 'This error happened ' + g.count + ' times.'); } }, 'Ask Copilot');
-      item.append(ask);
-      list.append(item);
+      list.append(h('li', null, h('div', {
+        class: 'ins-group', role: 'button', tabindex: '0',
+        title: g.sample + (g.frame ? '\nat ' + g.frame : '') + '\n\nClick to step through the ' + g.count + ' occurrence' + (g.count === 1 ? '' : 's'),
+        onclick: () => visit(g), onkeydown: (e) => { if (e.key === 'Enter') visit(g); },
+      },
+      h('span', { class: 'ins-gcount' + (g.level === 'WARN' ? ' warn' : '') }, g.count.toLocaleString() + '×'),
+      h('span', { class: 'ins-gtext' },
+        exc ? h('span', { class: 'ins-gexc' }, exc) : null,
+        h('span', { class: 'ins-gmsg' }, g.sample),
+        g.firstTs != null ? h('span', { class: 'ins-gwhen' }, g.count > 1 && g.lastTs !== g.firstTs ? Logs.formatTs(g.firstTs) + ' – ' + Logs.formatTs(g.lastTs) : Logs.formatTs(g.firstTs)) : null),
+      ask)));
     });
   }
 
@@ -3006,12 +3129,27 @@
     if (!res.rows.length) { body.innerHTML = '<div class="msg">No matches. Check the pattern, or turn off "Only entries shown by the current filter".</div>'; return; }
     const state = { res, sortCol: -1, asc: true };
     const columns = ['line'].concat(res.columns);
-    const asRows = () => [res.columns].concat(state.rows.map((r) => r.values));
+    // What Copy and Open as new tab produce: the Line column plus every value column, in the order shown.
+    // A pattern without variable parts has no value columns, so the whole entry line becomes the "text" column.
+    const srcTab = active;
+    const lineText = (ln) => { try { return srcTab && srcTab.model && !srcTab.model.isDisposed() ? srcTab.model.getLineContent(ln) : ''; } catch { return ''; } };
+    const asRows = () => {
+      const noCols = !res.columns.length;
+      const head = ['Line'].concat(noCols ? ['text'] : res.columns);
+      return [head].concat(state.rows.map((r) => [String(r.line)].concat(noCols ? [lineText(r.line)] : r.values)));
+    };
     state.rows = res.rows.slice();
     const tools = (label, fn, title) => { const b = h('button', { onclick: fn, title }, label); $('#panel-tools').append(b); };
-    tools('Copy as table', async () => { await api.clipboardWrite({ text: Tables.formatRows(asRows(), 'tsv'), html: Tables.rowsToHtml(asRows()) }); toast('Copied. Paste into Excel, Word or Outlook to get a real table.'); }, 'Copies a real table for Excel / Word / Outlook');
-    tools('Copy CSV', async () => { await api.clipboardWrite({ text: Tables.formatRows(asRows(), 'csv') }); toast('Copied as CSV'); });
-    tools('Open as new tab', () => { const t = newTab({ name: 'extract.csv', content: Tables.formatRows(asRows(), 'csv'), lang: 'plaintext' }); t.detectDone = true; activate(t); });
+    const copied = (ok, what) => toast(ok ? what : 'Could not copy: the browser blocked the clipboard. Click the page and try again.');
+    tools('Copy as table', async () => { const rows = asRows(); copied(await api.clipboardWrite({ text: Tables.formatRows(rows, 'tsv'), html: Tables.rowsToHtml(rows) }), 'Copied ' + (rows.length - 1).toLocaleString() + ' rows. Paste into Excel, Word or Outlook to get a real table.'); }, 'Copies a real table for Excel / Word / Outlook');
+    tools('Copy CSV', async () => { const rows = asRows(); copied(await api.clipboardWrite({ text: Tables.formatRows(rows, 'csv') }), 'Copied ' + (rows.length - 1).toLocaleString() + ' rows as CSV'); });
+    tools('Open as new tab', () => {
+      const base = ((srcTab && srcTab.name) || 'extract').replace(/\.[^.]+$/, '') + '-table';
+      const t = newTab({ name: base + '.csv', content: Tables.formatRows(asRows(), 'csv'), lang: 'plaintext' });
+      t.detectDone = true;
+      activate(t);
+      toast('Opened ' + state.rows.length.toLocaleString() + ' rows in a new tab. Save it as .csv to open it in Excel.');
+    }, 'Opens every row as CSV in a new tab');
     if (!opts.keepLast && res.columns.length) {
       const colSel = h('select', { title: 'Column to count' }, res.columns.map((c, i) => h('option', { value: String(i) }, c)));
       $('#panel-tools').append(colSel);
@@ -3061,7 +3199,7 @@
   function gotoLine(ln) {
     editor.setPosition({ lineNumber: ln, column: 1 });
     editor.revealLineInCenter(ln);
-    editor.setSelection(new monaco.Range(ln, 1, ln, active.model.getLineMaxColumn(ln)));
+    editor.setSelection(new monaco.Selection(ln, active.model.getLineMaxColumn(ln), ln, 1)); // cursor at the start: the line's start stays in view
     editor.focus();
   }
 
@@ -3070,8 +3208,6 @@
     const v = view('highlight');
     v.innerHTML = '';
     const refresh = debounce(() => { saveSettings(); updateRuleStyles(); tabs.forEach(refreshDecorations); }, 300);
-    const pk = h('input', { type: 'text', value: settings.myPackages, spellcheck: false, placeholder: 'com.mycompany, com.example',
-      oninput: debounce((e) => { settings.myPackages = e.target.value; saveSettings(); tabs.forEach((t) => { if (isLogTab(t)) { t.an = null; analyze(t); } refreshDecorations(t); }); onActiveAnalysisChanged(); }, 400) });
     const list = h('div');
     const drawRules = () => {
       list.innerHTML = '';
@@ -3089,9 +3225,6 @@
     };
     drawRules();
     v.append(
-      h('div', { class: 'group' }, h('h3', null, 'Your code'),
-        h('div', { class: 'field' }, h('label', null, 'Your packages (comma separated)'), pk),
-        h('p', { class: 'hint' }, 'Stack-trace lines from these packages are highlighted in your accent colour and used to show where errors happen. Framework frames are dimmed.')),
       h('div', { class: 'group' }, h('h3', null, 'Highlight rules'),
         h('p', { class: 'hint' }, 'Any regex, any colour. Rules apply to every open tab and also show as hover labels.'),
         list,
@@ -3145,7 +3278,7 @@
         check('wrap', 'Word wrap (Alt+Z)'),
         check('whitespace', 'Show whitespace'),
         check('minimap', 'Minimap'),
-        check('signal', 'Signal strip above logs', renderSignal)),
+        check('signal', 'Timeline above logs', renderSignal)),
       h('div', { class: 'group' }, h('h3', null, 'Pasting tables'),
         h('div', { class: 'field' }, h('label', null, 'Tables from Excel or web pages are pasted as'),
           h('select', { onchange: (e) => set('pasteFormat', e.target.value) },
@@ -4508,8 +4641,10 @@
     renderGrid();
     const fmt = h('select', null, Tables.FORMATS.map((f) => h('option', { value: f, selected: f === settings.pasteFormat }, f === 'aligned' ? 'aligned columns' : f)));
     $('#panel-tools').append(fmt);
-    panelButton('Copy as table', async () => { const r = readGrid(); await api.clipboardWrite({ text: Tables.formatRows(r, 'tsv'), html: Tables.rowsToHtml(r) }); toast('Copied. Paste into Word, Outlook or Excel to get a real table.'); });
-    panelButton('Copy as text', async () => { await api.clipboardWrite({ text: Tables.formatRows(readGrid(), fmt.value) }); toast('Copied as ' + fmt.value); });
+    const copied = (ok, what) => toast(ok ? what : 'Could not copy: the browser blocked the clipboard. Click the page and try again.');
+    panelButton('Copy as table', async () => { const r = readGrid(); copied(await api.clipboardWrite({ text: Tables.formatRows(r, 'tsv'), html: Tables.rowsToHtml(r) }), 'Copied. Paste into Word, Outlook or Excel to get a real table.'); });
+    panelButton('Copy as text', async () => { copied(await api.clipboardWrite({ text: Tables.formatRows(readGrid(), fmt.value) }), 'Copied as ' + fmt.value); });
+    panelButton('Open as new tab', () => { const t = newTab({ name: 'table.md', content: Tables.formatRows(readGrid(), 'markdown'), lang: 'markdown' }); t.detectDone = true; activate(t); }, 'Opens the table as Markdown in a new tab');
     panelButton('Write back to editor', () => {
       const text = Tables.formatRows(readGrid(), fmt.value);
       editor.pushUndoStop();
@@ -4933,7 +5068,7 @@
     $('#panel-close').onclick = closePanel;
     wireSideResize();
     wireSignal();
-    wireQueryBar();
+    wireFilterRow();
     wireSnapDrag();
     wireLayoutButton();
     wirePanelResize();
@@ -4944,7 +5079,7 @@
     wireWelcome();
     setupTitleBar();
     editor.onDidChangeModelContent(() => updateWelcome());
-    window.addEventListener('resize', debounce(renderSignal, 150));
+    window.addEventListener('resize', debounce(() => { renderSignal(); renderFilterBar(); }, 150));
 
     watchKeyboardPaste();
     editor.onDidChangeCursorPosition(updateStatus);
@@ -5002,7 +5137,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });

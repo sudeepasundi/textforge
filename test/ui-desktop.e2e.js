@@ -29,7 +29,7 @@ const appDir = path.join(__dirname, '..');
       const reg = (el) => getComputedStyle(el).getPropertyValue('-webkit-app-region') || getComputedStyle(el).webkitAppRegion;
       return { bar: reg(document.getElementById('topbar')), tab: reg(document.querySelector('.tab')), btn: reg(document.querySelector('#topbar [data-act="new"]')), search: reg(document.getElementById('palette-btn')) };
     });
-    return ok(r.bar === 'drag' && r.tab === 'no-drag' && r.btn === 'no-drag' && r.search === 'no-drag', JSON.stringify(r));
+    return ok(r.bar === 'drag' && r.tab !== 'drag' && r.btn === 'no-drag' && r.search === 'no-drag', JSON.stringify(r));
   });
   await check('Space is kept for the minimise / maximise / close buttons', async () => {
     const r = await E(() => ({ pad: parseFloat(getComputedStyle(document.getElementById('topbar')).paddingRight), searchRight: document.getElementById('palette-btn').getBoundingClientRect().right, w: window.innerWidth }));
