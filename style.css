@@ -707,19 +707,7 @@ body.tauri #topbar { position: relative; }
 .qb-ex code { font: 12px var(--mono); color: var(--accent-text); white-space: nowrap; }
 .qb-ex span { color: var(--muted); }
 
-/* the file tabs get their own row above the timeline */
-#tabrow { display: flex; height: 34px; flex: none; background: var(--surface); border-bottom: 1px solid var(--line); }
-#tabrow #tabs { flex: 1; }
-#tabrow .tab.active::after { bottom: 0; }
-body.compact #tabrow { height: 30px; }
 
-/* filter summary in the status bar */
-#st-filter { display: flex; align-items: center; gap: 4px; margin-left: 6px; padding-left: 10px; border-left: 1px solid var(--line); white-space: nowrap; min-width: 0; overflow: hidden; }
-#st-filter[hidden] { display: none; }
-#st-filter b { color: var(--fg); font-weight: 600; }
-#st-filter .st-err { color: var(--err); overflow: hidden; text-overflow: ellipsis; }
-#st-filter .st-warn { color: var(--warn); }
-#statusbar #st-filter button { color: var(--accent-text); }
 
 /* results drawer tabs */
 #panel-tabs { display: flex; gap: 2px; min-width: 0; flex: 0 1 auto; overflow: hidden; margin-left: -6px; }
@@ -1056,7 +1044,7 @@ body.incident-open #logbar { display: none !important; }
 .lb-tog { flex: none; width: 24px; height: 22px; padding: 0; border: 1px solid transparent; border-radius: 4px; background: none; color: var(--muted); font: 600 11px var(--mono); }
 .lb-tog:hover { background: var(--raised); color: var(--fg); }
 .lb-tog[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent-text); color: var(--accent-text); }
-#filterbar .lb-more, #filterbar .qb-clear, #filterbar .lb-auto {
+#filterbar .lb-more, #filterbar .qb-clear, #filterbar .lb-auto, #filterbar .lb-copy {
   display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--bg); color: var(--fg); font-size: 12px; white-space: nowrap; flex: none; width: auto;
 }
@@ -1066,7 +1054,8 @@ body.incident-open #logbar { display: none !important; }
 #filterbar .lb-more[aria-expanded="true"] { background: var(--raised); }
 #filterbar .lb-more[aria-expanded="true"] svg { transform: rotate(180deg); }
 #filterbar .lb-more.has { border-color: var(--accent-text); color: var(--accent-text); }
-#filterbar .qb-clear { border-color: transparent; background: none; color: var(--accent-text); padding: 0 6px; }
+#filterbar .qb-clear, #filterbar .lb-copy { border-color: transparent; background: none; color: var(--accent-text); padding: 0 6px; }
+#filterbar .lb-copy[hidden] { display: none; }
 #filterbar .qb-clear[hidden] { display: none; }
 #filterbar .qb-count { font-size: 12px; }
 #filterbar .qb-count b { color: var(--fg); font-weight: 600; }
@@ -1148,3 +1137,38 @@ body.frameless #logbar { -webkit-app-region: no-drag; }
 
 /* the web build has no floating Copilot button (0.18.1) */
 body.web #cp-fab { display: none !important; }
+
+/* 0.18.2: the file tabs are back in the title bar (one row less above the editor) */
+#topbar #tabs { align-self: stretch; }
+#topbar .tab.active::after { bottom: 0; }
+
+/* 0.18.2: More filters is one compact row; multi-line boxes open over the editor while focused */
+.lb-advanced { display: flex; flex-wrap: wrap; gap: 6px 10px; padding: 6px 12px 8px; }
+.lb-advanced .lb-f { flex: 1 1 140px; gap: 2px; }
+.lb-advanced .lb-f0 { flex: 2 1 220px; }
+.lb-advanced .lb-f1, .lb-advanced .lb-f4 { flex: 1.5 1 180px; }
+.lb-advanced .lb-f3 { flex: 0 1 90px; }
+.lb-advanced .lb-f5, .lb-advanced .lb-f6 { flex: 0 1 120px; }
+.lb-advanced .lb-f > .lb-fh { min-height: 18px; font-size: 11px; }
+.lb-advanced .lb-f select { height: 18px; font-size: 11px; padding: 0 2px; }
+.lb-advanced .lb-f input { height: 28px; padding: 0 8px; }
+.lb-area { position: relative; height: 28px; }
+.lb-area textarea { position: absolute; left: 0; right: 0; top: 0; height: 28px; min-height: 0; padding: 5px 8px; resize: none; overflow: hidden; white-space: pre; line-height: 16px; }
+.lb-area textarea:focus { height: 92px; z-index: 40; overflow: auto; white-space: pre-wrap; box-shadow: 0 10px 28px rgba(0,0,0,.28); }
+#logbar { position: relative; z-index: 6; }
+
+/* 0.18.2: shortcut hints in menus; the results Copy menu button */
+.menu button { display: flex; align-items: center; gap: 18px; }
+.menu .menu-key { margin-left: auto; font: 11px var(--mono); color: var(--muted); background: none; border: none; padding: 0; }
+#panel-tools .menu-btn { display: inline-flex; align-items: center; gap: 4px; }
+#panel-tools .menu-btn .chev svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; display: block; }
+
+/* 0.18.2: time ticks under the strip, Zoom to range */
+.lb-ticks { position: relative; height: 15px; font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; }
+.lb-ticks span { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
+.lb-ticks span::before { content: ""; position: absolute; left: 50%; top: -3px; width: 1px; height: 3px; background: color-mix(in srgb, var(--fg) 30%, var(--line)); }
+.lb-labels .lb-zoom { flex: none; height: 17px; padding: 0 7px; margin: -2px 0; border: 1px solid var(--accent-text); border-radius: 9px; background: var(--accent-soft); color: var(--accent-text); font-size: 11px; line-height: 15px; cursor: pointer; }
+.lb-labels .lb-zoom[hidden] { display: none; }
+.lb-labels .lb-zoom:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.lb-labels .lb-hint { flex: 1; }
+body.compact .lb-ticks { height: 13px; }

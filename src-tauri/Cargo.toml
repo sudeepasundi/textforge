@@ -1,6 +1,6 @@
 [package]
 name = "textforge"
-version = "0.18.1"
+version = "0.18.2"
 description = "TextForge - log-aware text editor"
 authors = ["NUKE"]
 license = "MIT"

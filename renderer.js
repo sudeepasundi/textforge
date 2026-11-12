@@ -524,6 +524,7 @@
     const items = [
       ['Rename', () => { activate(t); setTimeout(() => startRename(t), 0); }],
       [inSplit(t) ? 'Remove from split view' : 'Show beside (split view)', () => (inSplit(t) ? removeSplitTab(t) : addSplitPane(t))],
+      ['Compare with…', () => { activate(t); pickCompare(); }, !others.some((o) => !isPristineUntitled(o)), 'Alt+D'],
       null,
       ['Move to the start', () => moveTab(t, tabs[0], false), tabs[0] === t],
       ['Move to the end', () => moveTab(t, tabs[tabs.length - 1], true), tabs[tabs.length - 1] === t],
@@ -532,11 +533,16 @@
       ['Close', () => closeTab(t)],
       ['Close other tabs', async () => { for (const o of others) if (!(await closeTab(o))) break; }, !others.length],
     ];
+    showMenu(items, x, y);
+  }
+  // A small menu at (x, y). items: [label, run, disabled, shortcut] or null for a separator.
+  function showMenu(items, x, y) {
+    closeMenu();
     const menu = h('div', { class: 'menu', role: 'menu' });
     for (const it of items) {
-      if (it === null) { if (menu.lastChild && !menu.lastChild.classList.contains('sep')) menu.append(h('div', { class: 'sep' })); continue; }
-      const [label, run, disabled] = it;
-      menu.append(h('button', { role: 'menuitem', disabled: !!disabled, onclick: () => { closeMenu(); run(); } }, label));
+      if (!it) { if (it === null && menu.lastChild && !menu.lastChild.classList.contains('sep')) menu.append(h('div', { class: 'sep' })); continue; }
+      const [label, run, disabled, key] = it;
+      menu.append(h('button', { role: 'menuitem', disabled: !!disabled, onclick: () => { closeMenu(); run(); } }, label, key ? h('kbd', { class: 'menu-key' }, key) : null));
     }
     document.body.append(menu);
     const r = menu.getBoundingClientRect();
@@ -2149,8 +2155,7 @@
     const log = !!(active && isLogTab(active));
     const an = log ? analyze(active) : null;
     logbar.hidden = !an;
-    const st = $('#st-filter');
-    if (!an) { st.hidden = true; return; }
+    if (!an) return;
     const f = active.filter;
     const input = $('#qb-input');
     const text = bar.querySelector('.lb-text');
@@ -2165,7 +2170,8 @@
     // chips for the filters that have no control of their own in the row
     const box = bar.querySelector('.qb-chips');
     box.innerHTML = '';
-    for (const c of filterChips(f)) {
+    // while More filters is open its fields show the same filters, so the box keeps its room for typing (0.18.2)
+    for (const c of filterChips(f).filter((x) => !moreOpen || x.key === 'lines')) {
       const chip = h('span', { class: 'qb-chip' + (c.time ? ' time' : ''), title: c.title || '' },
         h('span', { class: 'qb-k' }, c.key + (c.op || ':')), h('b', null, c.val),
         h('button', { class: 'qb-x', title: 'Remove', 'aria-label': 'Remove the ' + c.key + ' filter', onclick: (e) => { e.stopPropagation(); setFilter(c.clear); if (currentView === 'insights') renderInsights(); } }, '×'));
@@ -2185,19 +2191,11 @@
     else cnt.append(total + ' entries');
     cnt.classList.toggle('none', filtering && shown === 0);
     cnt.title = (an.formatLabel || 'Log') + ' log' + (filtering && shown === 0 ? '. Nothing matches, so the full log is shown.' : '');
+    // Copy shown sits next to the count while a filter is on (0.18.2: the status bar no longer repeats the summary)
+    bar.querySelector('.lb-copy').hidden = !filtering || shown === 0;
     bar.querySelector('.qb-clear').hidden = !filtering;
     bar.classList.toggle('active', filtering);
     renderAdvanced();
-    // status bar: the same summary, with Copy shown
-    st.innerHTML = '';
-    if (!filtering) { st.hidden = true; return; }
-    st.append(...[
-      h('span', null, h('b', null, shown.toLocaleString()), ' of ' + total + ' entries shown'),
-      an.filterError ? h('span', { class: 'st-err' }, 'Invalid regex: ' + an.filterError) : null,
-      shown === 0 ? h('span', { class: 'st-warn' }, 'Nothing matches, so the full log is shown') : null,
-      h('button', { onclick: copyShown, title: 'Copy only the entries the filter shows' }, 'Copy shown'),
-      h('button', { onclick: clearFilter, title: 'Show every entry again' }, 'Clear filter')].filter(Boolean));
-    st.hidden = false;
   }
 
   // The fields behind "More filters". Rebuilt only when nothing in it has focus, so typing is never interrupted.
@@ -2213,18 +2211,18 @@
     const mode = h('select', { title: 'With several patterns: entries matching any of them, or all of them', onchange: (e) => setFilter({ includeMode: e.target.value }) },
       h('option', { value: 'any', selected: f.includeMode !== 'all' }, 'any of'), h('option', { value: 'all', selected: f.includeMode === 'all' }, 'all of'));
     adv.innerHTML = '';
+    // 0.18.2: one compact row. Multi-line boxes are one line tall and open downwards, over the editor, while focused.
+    const wrap = (ta) => h('div', { class: 'lb-area' }, ta);
     adv.append(
-      field('Lines matching', area('include', 'One pattern per line, text or regex'), mode),
-      field('Hide lines matching', area('exclude', 'HealthCheck\nactuator')),
-      h('div', { class: 'lb-f' },
-        field('Logger or thread', input('logger', 'e.g. PaymentClient or exec-3')),
-        field('Took at least (ms)', input('took', 'e.g. 1000', { inputmode: 'numeric' }))),
-      h('div', { class: 'lb-f' },
-        field('Trace IDs', area('trace', 'One ID per line')),
-        h('div', { class: 'lb-two' },
-          field('From', input('from', '10:15 or drag')),
-          field('To', input('to', '10:20')))),
+      field('Lines matching', wrap(area('include', 'One pattern per line, text or regex')), mode),
+      field('Hide lines matching', wrap(area('exclude', 'HealthCheck, one per line'))),
+      field('Logger or thread', input('logger', 'PaymentClient, exec-3')),
+      field('Took ≥ ms', input('took', '1000', { inputmode: 'numeric' })),
+      field('Trace IDs', wrap(area('trace', 'One ID per line'))),
+      field('From', input('from', '10:15 or drag')),
+      field('To', input('to', '10:20')),
     );
+    adv.querySelectorAll('.lb-f').forEach((el, i) => el.classList.add('lb-f' + i));
   }
 
   function wireFilterRow() {
@@ -2276,7 +2274,8 @@
       b.addEventListener('click', () => { if (active) setFilter({ [b.dataset.tog]: !active.filter[b.dataset.tog] }); });
     }
     bar.querySelector('.qb-clear').onclick = () => { clearFilter(); };
-    bar.querySelector('.lb-more').onclick = () => { moreOpen = !moreOpen; renderFilterBar(); if (moreOpen) { const first = $('#logbar .lb-advanced textarea'); if (first) first.focus(); } };
+    bar.querySelector('.lb-copy').onclick = () => copyShown();
+    bar.querySelector('.lb-more').onclick = () => { moreOpen = !moreOpen; renderFilterBar(); };
     bar.querySelector('.lb-auto').onclick = () => { extractState.preset = 'auto'; if (currentView === 'extract') renderExtract(); runAutoTables(); };
     bar.querySelector('.lb-prev').onclick = () => jumpError(-1);
     bar.querySelector('.lb-next').onclick = () => jumpError(1);
@@ -2398,12 +2397,26 @@
   // One bar per time slice: all entries in grey, warnings and errors on top. Bars the filter hides are dimmed,
   // the chosen time range is outlined. Click a bar to jump there, drag to filter by time, double-click to clear.
   const TL_HINT = 'Click a bar to jump there · drag to filter by time';
-  const TL_HINT_RANGE = 'Showing the selected time range · double-click to clear';
+  // "1 min 16 s" (0.18.2: the hint says how long the selected range is)
+  function spanLabel(ms) {
+    if (!Number.isFinite(ms) || ms < 1000) return Math.max(0, Math.round(ms || 0)) + ' ms';
+    const sec = Math.floor(ms / 1000); // a range "to 10:17:10" ends at 10:17:10.999: count whole seconds
+    if (sec < 60) return sec + ' s';
+    if (sec < 3600) return Math.floor(sec / 60) + ' min' + (sec % 60 ? ' ' + (sec % 60) + ' s' : '');
+    if (sec < 86400) return Math.floor(sec / 3600) + ' h' + (Math.floor((sec % 3600) / 60) ? ' ' + Math.floor((sec % 3600) / 60) + ' min' : '');
+    return Math.floor(sec / 86400) + ' d' + (Math.floor((sec % 86400) / 3600) ? ' ' + Math.floor((sec % 86400) / 3600) + ' h' : '');
+  }
+  function rangeHint() {
+    const an = active && active.an;
+    const sel = an ? selectedRange(an) : null;
+    if (!sel) return null;
+    const a = Number.isFinite(sel.a) ? sel.a : an.timeline.min, b = Number.isFinite(sel.b) ? sel.b : an.timeline.max;
+    return Logs.formatTs(a) + ' – ' + Logs.formatTs(b) + ' (' + spanLabel(b - a) + ' selected) · double-click to clear';
+  }
   function timelineHint(text) {
     const el = $('#logbar .lb-hint');
     if (!el) return;
-    const f = active && active.filter;
-    el.textContent = text || (f && (f.from || f.to) ? TL_HINT_RANGE : TL_HINT);
+    el.textContent = text || rangeHint() || (active && active.tlZoom ? 'Zoomed in · click a bar to jump there · drag to filter by time' : TL_HINT);
     el.classList.toggle('live', !!text);
   }
   // Bars for the strip, sized to its width like tracepad: one bar per ~7 px (12 to 180 bars), the log's time
@@ -2414,13 +2427,14 @@
     if (!tl || !box) return null;
     const width = box.clientWidth || box.parentElement.clientWidth || 0;
     const count = Math.max(12, Math.min(180, Math.floor(width / 7)));
+    const z = active && active.an === an ? active.tlZoom : null;
     const c = an.strip;
-    if (c && c.count === count && c.vis === an.vis) return c;
-    const lo = tl.min, hi = tl.max;
+    if (c && c.count === count && c.vis === an.vis && c.zoom === z) return c;
+    const lo = z ? z.lo : tl.min, hi = z ? z.hi : tl.max;
     const size = Math.max(1, hi - lo) / count;
     const buckets = Array.from({ length: count }, (_, k) => ({ start: lo + k * size, end: lo + (k + 1) * size, total: 0, warn: 0, error: 0, shown: 0, first: -1, firstErr: -1, firstVis: -1, firstVisErr: -1 }));
     an.entries.forEach((e, i) => {
-      if (e.ts == null || e.ts < lo) return;
+      if (e.ts == null || e.ts < lo || e.ts > hi) return;
       const bk = buckets[Math.min(count - 1, Math.floor((e.ts - lo) / size))];
       const vis = !an.vis || an.vis[i];
       bk.total++;
@@ -2429,7 +2443,7 @@
       if (e.level === 'ERROR') { bk.error++; if (bk.firstErr < 0) bk.firstErr = i; if (vis && bk.firstVisErr < 0) bk.firstVisErr = i; }
       else if (e.level === 'WARN') bk.warn++;
     });
-    an.strip = { count, vis: an.vis, lo, hi: lo + count * size, size, buckets };
+    an.strip = { count, vis: an.vis, zoom: z, lo, hi: lo + count * size, size, buckets };
     return an.strip;
   }
   // The selected time range in ms, or null.
@@ -2462,6 +2476,8 @@
       end.textContent = '';
       $('#logbar .lb-hint').textContent = '';
       renderSignalRange(null);
+      renderTicks(null);
+      renderZoomButton(null);
       return;
     }
     const st = stripBuckets(an);
@@ -2483,6 +2499,49 @@
     });
     bars.append(frag);
     renderSignalRange(st);
+    renderTicks(st);
+    renderZoomButton(an);
+  }
+
+  // Time labels under the strip at round steps (10:16, 10:17 …), about one per 90 px.
+  const TICK_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400].map((x) => x * 1000);
+  function renderTicks(st) {
+    const box = $('#logbar .lb-ticks');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!st) return;
+    const span = st.hi - st.lo;
+    const want = Math.max(2, Math.floor(($('#signal').clientWidth || 600) / 90));
+    const step = TICK_STEPS.find((x) => span / x <= want) || TICK_STEPS[TICK_STEPS.length - 1];
+    const fmt = (t) => { const v = Logs.formatTs(t, step >= 86400000); return step >= 86400000 ? v.slice(0, 10) : step >= 60000 ? v.slice(0, 5) : v; };
+    for (let t = Math.ceil(st.lo / step) * step; t <= st.hi; t += step) {
+      const p = ((t - st.lo) / span) * 100;
+      if (p < 2 || p > 98) continue; // the start and end are already written above the strip
+      box.append(h('span', { style: 'left:' + p.toFixed(2) + '%' }, fmt(t)));
+    }
+  }
+
+  // "Zoom to range" redraws the bars over just the selected range; "Show all time" goes back.
+  function renderZoomButton(an) {
+    const b = $('#logbar .lb-zoom');
+    if (!b) return;
+    const sel = an ? selectedRange(an) : null;
+    if (active && active.tlZoom) { b.hidden = false; b.textContent = 'Show all time'; b.title = 'Draw the whole log again'; return; }
+    b.hidden = !sel;
+    b.textContent = 'Zoom to range';
+    b.title = 'Draw the bars over just the selected range';
+  }
+  function zoomTimeline(on) {
+    if (!active || !active.an || !active.an.timeline) return;
+    if (!on) active.tlZoom = null;
+    else {
+      const an = active.an, sel = selectedRange(an);
+      if (!sel) return;
+      const lo = Math.max(an.timeline.min, sel.a), hi = Math.min(an.timeline.max, sel.b);
+      if (!(hi > lo)) return;
+      active.tlZoom = { lo, hi };
+    }
+    renderSignal();
   }
 
   // The time range from the filter, outlined on the strip.
@@ -2550,7 +2609,7 @@
       band.style.left = (a - rect.left) + 'px';
       band.style.width = (b - a) + 'px';
       const ra = signalBucketAt(a), rb = signalBucketAt(b - 1);
-      if (ra && rb) timelineHint(Logs.formatTs(ra.b.start) + ' – ' + Logs.formatTs(rb.b.end) + '  ·  release to filter');
+      if (ra && rb) timelineHint(Logs.formatTs(ra.b.start) + ' – ' + Logs.formatTs(rb.b.end) + ' (' + spanLabel(rb.b.end - ra.b.start) + ') · release to filter');
     });
     const endDrag = (e) => {
       if (!drag) return;
@@ -2575,10 +2634,12 @@
     box.addEventListener('pointerup', endDrag);
     box.addEventListener('pointercancel', () => { drag = null; band.hidden = true; box.classList.remove('dragging'); timelineHint(); });
     box.addEventListener('dblclick', () => {
-      if (!active || !active.filter || (!active.filter.from && !active.filter.to)) return;
-      setFilter({ from: '', to: '' });
+      if (!active || !active.filter) return;
+      if (active.filter.from || active.filter.to) setFilter({ from: '', to: '' });
+      else if (active.tlZoom) zoomTimeline(false);
       timelineHint();
     });
+    $('#logbar .lb-zoom').addEventListener('click', () => zoomTimeline(!(active && active.tlZoom)));
     box.addEventListener('click', (e) => {
       if (suppressClick) { suppressClick = false; return; }
       const r = signalBucketAt(e.clientX);
@@ -3141,15 +3202,20 @@
     state.rows = res.rows.slice();
     const tools = (label, fn, title) => { const b = h('button', { onclick: fn, title }, label); $('#panel-tools').append(b); };
     const copied = (ok, what) => toast(ok ? what : 'Could not copy: the browser blocked the clipboard. Click the page and try again.');
-    tools('Copy as table', async () => { const rows = asRows(); copied(await api.clipboardWrite({ text: Tables.formatRows(rows, 'tsv'), html: Tables.rowsToHtml(rows) }), 'Copied ' + (rows.length - 1).toLocaleString() + ' rows. Paste into Excel, Word or Outlook to get a real table.'); }, 'Copies a real table for Excel / Word / Outlook');
-    tools('Copy CSV', async () => { const rows = asRows(); copied(await api.clipboardWrite({ text: Tables.formatRows(rows, 'csv') }), 'Copied ' + (rows.length - 1).toLocaleString() + ' rows as CSV'); });
-    tools('Open as new tab', () => {
+    const copyTable = async () => { const rows = asRows(); copied(await api.clipboardWrite({ text: Tables.formatRows(rows, 'tsv'), html: Tables.rowsToHtml(rows) }), 'Copied ' + (rows.length - 1).toLocaleString() + ' rows. Paste into Excel, Word or Outlook to get a real table.'); };
+    const copyCsv = async () => { const rows = asRows(); copied(await api.clipboardWrite({ text: Tables.formatRows(rows, 'csv') }), 'Copied ' + (rows.length - 1).toLocaleString() + ' rows as CSV'); };
+    const openTab = () => {
       const base = ((srcTab && srcTab.name) || 'extract').replace(/\.[^.]+$/, '') + '-table';
       const t = newTab({ name: base + '.csv', content: Tables.formatRows(asRows(), 'csv'), lang: 'plaintext' });
       t.detectDone = true;
       activate(t);
       toast('Opened ' + state.rows.length.toLocaleString() + ' rows in a new tab. Save it as .csv to open it in Excel.');
-    }, 'Opens every row as CSV in a new tab');
+    };
+    // 0.18.2: the three copy / export actions are one "Copy" menu, so the toolbar has room for the rest
+    const copyBtn = h('button', { class: 'menu-btn', 'aria-haspopup': 'menu', title: 'Copy the rows as a table or CSV, or open them in a new tab',
+      onclick: (e) => { const b = e.currentTarget.getBoundingClientRect(); showMenu([['Copy as table (Excel, Word, Outlook)', copyTable], ['Copy as CSV', copyCsv], null, ['Open as new tab (CSV)', openTab]], b.left, b.bottom + 4); } },
+    'Copy', h('span', { class: 'chev', 'aria-hidden': 'true', html: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>' }));
+    $('#panel-tools').append(copyBtn);
     if (!opts.keepLast && res.columns.length) {
       const colSel = h('select', { title: 'Column to count' }, res.columns.map((c, i) => h('option', { value: String(i) }, c)));
       $('#panel-tools').append(colSel);
@@ -4766,7 +4832,7 @@
       ['Mask secrets into a new tab', 'Logs', '', maskToNewTab],
       ['Find duplicate lines and repeated entries', 'Logs', '', findDuplicates],
       ['Copy shown entries (what the filter shows)', 'Logs', '', copyShown],
-      ['Compare with another tab (side-by-side diff)', 'Edit', '', pickCompare],
+      ['Compare with another tab (side-by-side diff)', 'Edit', 'Alt+D', pickCompare],
       ['Investigate logs together (incident: one clock for several logs)', 'Logs', 'Alt+I', pickIncident],
       ['Try the incident sample (4 services)', 'Help', '', openIncidentSample],
       ...(incident && !$('#incident') ? [['Back to the incident', 'Logs', '', reopenIncident]] : []),
@@ -4977,6 +5043,7 @@
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyN') actions.new();
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyW') actions.close();
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyT') openTableView();
+    else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyD') { e.preventDefault(); pickCompare(); }
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyI') { if (incident && !$('#incident')) reopenIncident(); else pickIncident(); }
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyP') setPreview(!(active && active.preview));
     else if (e.altKey && !ctrl && e.shiftKey && e.code === 'KeyP') {
@@ -5137,7 +5204,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { zoomTimeline, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });

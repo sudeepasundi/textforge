@@ -333,3 +333,17 @@ TIMELINE AND FILTERS IN ONE BAR (0.18.1)
   copy every row with its Line, and say so when the browser blocks the clipboard.
   Jumping to an error or a result line keeps the start of the line (time and level) in
   view instead of scrolling to the end of a long line.
+
+A ROOMIER LAYOUT (0.18.2)
+  The file tabs are back in the title bar, so the editor gets one more row. The status
+  bar no longer repeats the filter summary: "Copy shown" now sits next to the entry
+  count in the filter row.
+  More filters is one compact row. The multi-line boxes (lines matching, hide lines,
+  trace IDs) are one line tall and open over the log while you type in them.
+  Timeline: time marks under the bars (10:16, 10:17 ...). With a time range selected
+  the hint says how long it is ("1 min 10 s selected") and "Zoom to range" (top right of
+  the timeline) redraws the bars over just that window; "Show all time" goes back.
+  Double-click clears the range, then the zoom.
+  Results under the editor: Copy as table, Copy as CSV and Open as new tab are now one
+  "Copy" menu.
+  Compare is easier to find: right-click a tab > "Compare with..." or press Alt+D.

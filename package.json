@@ -1,7 +1,7 @@
 {
   "name": "textforge",
   "productName": "TextForge",
-  "version": "0.18.1",
+  "version": "0.18.2",
   "description": "A log-aware text editor for backend developers",
   "main": "main.js",
   "scripts": {

@@ -1,7 +1,7 @@
 # TextForge: project context for Claude Code
 
 This file is the hand-off for continuing work on TextForge. Read it fully before changing anything.
-Current version: **0.18.1** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
+Current version: **0.18.2** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
 
 **Direction (agreed 2026-11-07):** move to Tauri 2 + a Rust log engine (also WASM on the web) + Svelte/TypeScript,
 one phase per release; 0.13.0 added the Tauri preview. The UI follows design "D · Focus with tools" from the
@@ -123,7 +123,9 @@ command palette (~3628) · misc actions, keyboard shortcuts, init (~3745–end).
   outline, hover readout in `.lb-hint`) and the filter row `#filterbar` (level chips `.lb-lvl`, the text box `#qb-input` with
   Aa / .* toggles = `filter.text/textCase/textRegex`, applied live after `Logs.filterEntries` in `computeVisibility()`,
   More filters `.lb-advanced`, count, Clear filters, Auto tables, error arrows). Text that looks like query syntax
-  (`isQueryLike`) waits for Enter and goes through `applyQuery()`. The title bar no longer has a filter box. Levels are
+  (`isQueryLike`) waits for Enter and goes through `applyQuery()`. The title bar holds the file tabs again (0.18.2;
+  `#tabrow` is gone). Timeline extras (0.18.2): `renderTicks()`, `tab.tlZoom` via `zoomTimeline()`, `spanLabel()` in the hint.
+  `showMenu(items, x, y)` is the shared small menu (tab menu, results Copy menu). Levels are
   shown by the chips, not as a query chip. Chips come from
   `filterChips(tab.filter)`, each with the patch that removes it; typed text goes through `applyQuery()`. New filter
   syntax needs both: a branch in `applyQuery()` and a chip in `filterChips()`. `filter.took` (ms) is applied after
@@ -181,7 +183,7 @@ node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
 node test/files.e2e.js         # 19  Open files list
 node test/fullscreen.e2e.js    # 38  resize and full screen everywhere, including appearance checks
 node test/incident.e2e.js      # 45  incident view: lanes, findings, time window, reader, jump to a line, requests, pins and report, phone
-node test/querybar.e2e.js      # 65  log bar, Log insights (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge
+node test/querybar.e2e.js      # 75  log bar, Log insights, zoom/ticks, Copy menu, Compare with… (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge
 xvfb-run -a node test/ui-desktop.e2e.js   # 9  Electron: title bar, Copilot resize, full-screen window restore
 ```
 
@@ -190,8 +192,8 @@ Electron tests need a display (`xvfb-run` on Linux).
 
 **Always look at screenshots, not only numbers.** The owner rejected a release where every test
 passed but the full-screen preview looked bad: content was capped at 1100 px and the scrollbar sat
-in the middle of the screen. For any UI change, take Playwright screenshots at 1920×1080, 1366×768
-and a phone (390×844), in the dark (`slate`) and a light theme, and **read them** before saying
+in the middle of the screen. For any UI change, take Playwright screenshots at 1920×1080 and 1366×768
+(no phone sizes: the owner dropped mobile checks on 2026-11-12), in the dark (`slate`) and a light theme, and **read them** before saying
 it's done. Add assertions about appearance (widths used, scrollbar at the edge, controls next to
 what they control), not just positions.
 
@@ -253,8 +255,8 @@ GitHub runs occasionally sit in "queued" for a long time; re-dispatching usually
 
 Suggested next (agreed or offered to the owner):
 
-- **Compare view is hard to find:** it's only in the command palette ("Compare with another tab").
-  Offered: add "Compare with…" to the tab right-click menu and the Open files list, plus a shortcut.
+- **Compare from the Open files list:** 0.18.2 added "Compare with…" to the tab menu and Alt+D; the Open files list
+  could offer it too.
 - **Filters in split view** always come from the main editor; setting a filter while a pane has
   focus could apply from that pane instead.
 - **Incident next:** convert time-zone offsets so logs from different zones line up; keep incidents (with their
