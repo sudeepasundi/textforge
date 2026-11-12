@@ -23,6 +23,8 @@ logs automatically.
   Level chips with counts, a filter box that filters as you type (match case, regex), and More filters for
   logger, trace IDs, duration and time. Ctrl+K, then `level:warn+ logger:Payment took>1000 -healthcheck` and
   Enter adds chips; start with `>` to run a command.
+- **Hide what you don't need.** Select a file name, a path or a prefix and hide it in every line (or every value of
+  the same shape), without changing the file; or remove it, with one undo. "Hidden: N" in the status bar shows it again.
 - **Auto tables.** TextForge learns the message patterns in a log and builds one table per pattern. Whatever
   changes between lines (IDs, users, durations, status words, key=value values, JSON fields) becomes a named
   column, and number columns get min / avg / p95 / max. Copy the result as a real table for Excel or Outlook,

@@ -354,3 +354,16 @@ A ROOMIER LAYOUT (0.18.2)
       results panel and the status bar step aside; Esc or Alt+M brings them back.
     Compare (Alt+D): pick another tab and see the two side by side.
     Investigate logs together (Alt+I): the incident view for several logs.
+
+HIDE OR REMOVE PART OF EVERY LINE (0.19.0)
+  Select the part of a line you don't need (a file name, a path, a thread, a long prefix)
+  and choose "Hide..." on the small toolbar above the selection (or right-click > "Hide
+  this text in every line..."):
+    Hide "<text>" in every line: exactly that text.
+    Hide text like this: the same shape with the changing parts left open, e.g. any path
+      with the same folders depth and extension, any "Something.java:123", any trace ID.
+    Remove ... from every line: really deletes it from the tab (one Ctrl+Z puts it back).
+  Hidden text is only hidden from view, in every tab; the file is unchanged. A small "..."
+  marks each place. "Hidden: N" in the status bar shows them again (click again to hide);
+  Copy shown leaves them out. Highlight (sidebar) > Hidden text lists the rules: switch
+  one off, edit its pattern, delete it, or add your own.

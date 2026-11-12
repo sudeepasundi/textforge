@@ -92,6 +92,7 @@
     Object.assign(settings, saved);
     settings.mask = Object.assign({}, defaults.mask, saved.mask || {});
     if (!Array.isArray(settings.rules)) settings.rules = DEFAULT_RULES;
+    if (!Array.isArray(settings.hideRules)) settings.hideRules = [];
   } catch { /* ignore */ }
   const writeSettings = () => { try { localStorage.setItem('tf-settings2', JSON.stringify(settings)); } catch { /* ignore */ } };
   const saveSettings = debounce(writeSettings, 300);
@@ -740,6 +741,7 @@
     $('#st-log').hidden = !an;
     if (an) $('#st-log').textContent = (an.formatLabel || 'Log') + '  ' + an.counts.ERROR + ' errors  ' + an.counts.WARN + ' warnings';
     $('#st-follow').hidden = !(active.path && isLogTab(active));
+    updateHiddenChip();
     $('#st-preview').hidden = !(active.model.getLanguageId() === 'markdown' || active.preview);
     $('#st-follow').classList.toggle('on', !!active.tailing);
     $('#st-follow').textContent = active.tailing ? 'Following' : 'Follow';
@@ -1156,6 +1158,7 @@
     $('#pv-close').onclick = () => setPreview(false);
     $('#pv-copy').onclick = copyRichText;
     $('#st-preview').onclick = () => setPreview(!(active && active.preview));
+    $('#st-hidden').onclick = () => { settings.showHidden = !settings.showHidden; refreshHidden(); };
     $('#preview-body').addEventListener('click', (e) => {
       if (e.target.closest('button, a, th') || !window.getSelection().isCollapsed) return;
       const el = e.target.closest('[data-line]');
@@ -1191,9 +1194,10 @@
 
   function shownText() {
     const an = isLogTab(active) ? analyze(active) : null;
-    if (!an || !an.vis) return active.model.getValue();
+    const hide = hideRulesActive().length && !settings.showHidden;
+    if (!an || !an.vis) return hide ? active.model.getLinesContent().map(withoutHidden).join('\n') : active.model.getValue();
     const out = [];
-    an.entries.forEach((e, i) => { if (an.vis[i]) for (let l = e.start; l <= e.end; l++) out.push(an.lines[l]); });
+    an.entries.forEach((e, i) => { if (an.vis[i]) for (let l = e.start; l <= e.end; l++) out.push(hide ? withoutHidden(an.lines[l]) : an.lines[l]); });
     return out.join('\n');
   }
   async function copyShown() {
@@ -2389,8 +2393,131 @@
       try { new RegExp(r.pattern); matches = tab.model.findMatches(r.pattern, false, true, !r.ci, null, false, 5000); } catch { return; }
       for (const m of matches) decos.push({ range: m.range, options: { inlineClassName: 'hl-r' + i, hoverMessage: { value: r.label || r.pattern } } });
     });
+    for (const d of hiddenDecorations(tab)) decos.push(d);
     tab.decoIds = tab.model.deltaDecorations(tab.decoIds, decos);
     tab.decoVersion = tab.model.getVersionId();
+    if (tab === active) updateHiddenChip();
+  }
+
+  // ---------- hidden text (0.19.0) ----------
+  // Parts of lines you don't need (a file path, a thread name, a long prefix) are hidden in every line, in every
+  // tab, without changing the file: a decoration collapses the text and leaves a small "⋯" marker. Rules live in
+  // settings.hideRules ([{ pattern (regex source), example, on }]); "Show hidden text" (settings.showHidden) shows the
+  // parts again, marked. "Remove" deletes them from the file instead (one undo step).
+  const HIDE_EXT = 'java|kt|kts|scala|groovy|js|mjs|ts|tsx|jsx|py|go|cs|rb|php|rs|c|cc|cpp|h|hpp|swift|log|txt|xml|ya?ml|json|properties|conf|sql|sh|class|jar|war';
+  const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // "Text like this": the same shape with the variable parts left open.
+  //   /opt/app/logs/order-7.log      -> any path with the same depth and extension
+  //   OrderService.java:112          -> any file name with that extension, any line number
+  //   c3e09f1a7b264d58, 18244, 10:15 -> hex and numbers of any value
+  function likePattern(text) {
+    const t = text;
+    const seps = (t.match(/[\\/]/g) || []).length;
+    if (seps >= 1 && !/\s/.test(t.trim())) {
+      // a path: keep the separators and the extension of the last part, open up everything else
+      const parts = t.split(/([\\/])/);
+      return parts.map((p, i) => {
+        if (p === '/' ) return '/';
+        if (p === '\\') return '\\\\';
+        if (!p) return '';
+        const last = i === parts.length - 1;
+        const ext = last ? new RegExp('\\.(' + HIDE_EXT + ')(:\\d+)?$', 'i').exec(p) : null;
+        if (ext) return '[^\\\\/\\s:()]+\\.' + reEsc(ext[1]) + (ext[2] ? ':\\d+' : '');
+        if (/^[A-Za-z]:$/.test(p)) return '[A-Za-z]:';
+        return '[^\\\\/\\s:()]+';
+      }).join('');
+    }
+    let src = '';
+    const re = new RegExp('([\\w$]+)\\.(' + HIDE_EXT + ')\\b|[0-9a-fA-F]*\\d[0-9a-fA-F]*(?=[^0-9a-zA-Z]|$)|\\d+', 'gi');
+    let at = 0, m;
+    while ((m = re.exec(t))) {
+      if (m[0] === '') { re.lastIndex++; continue; }
+      src += reEsc(t.slice(at, m.index));
+      if (m[1]) src += '[\\w$-]+\\.' + reEsc(m[2]);
+      else if (/^\d+$/.test(m[0])) src += '\\d+';
+      else if (m[0].length >= 6 && /[a-f]/i.test(m[0])) src += '[0-9a-fA-F]+';
+      else src += reEsc(m[0]);
+      at = m.index + m[0].length;
+    }
+    src += reEsc(t.slice(at));
+    return src;
+  }
+  function hideRulesActive() { return (settings.hideRules || []).filter((r) => r.on && r.pattern && safeRegex(r.pattern).re); }
+  function hiddenRanges(tab, limit = 50000) {
+    const out = [];
+    for (const r of hideRulesActive()) {
+      let ms = [];
+      try { ms = tab.model.findMatches(r.pattern, false, true, true, null, false, limit); } catch { continue; }
+      for (const m of ms) if (!m.range.isEmpty()) out.push(m.range);
+    }
+    return out;
+  }
+  function hiddenDecorations(tab) {
+    const ranges = hiddenRanges(tab);
+    tab.hiddenCount = ranges.length;
+    const shown = !!settings.showHidden;
+    return ranges.map((range) => ({ range, options: shown
+      ? { inlineClassName: 'tf-hidden-shown', hoverMessage: { value: 'Hidden text (shown because "Show hidden text" is on)' } }
+      : { inlineClassName: 'tf-hidden', inlineClassNameAffectsLetterSpacing: true,
+        before: { content: '⋯', inlineClassName: 'tf-hidden-mark', cursorStops: monaco.editor.InjectedTextCursorStops.None } } }));
+  }
+  // The text of one line as shown (hidden parts left out), for "Copy shown".
+  function withoutHidden(text) {
+    if (settings.showHidden) return text;
+    let out = text;
+    for (const r of hideRulesActive()) { try { out = out.replace(new RegExp(r.pattern, 'g'), ''); } catch { /* skip */ } }
+    return out;
+  }
+  function refreshHidden() {
+    saveSettings();
+    tabs.forEach(refreshDecorations);
+    updateHiddenChip();
+    if (currentView === 'highlight') renderHighlight();
+  }
+  function addHideRule(text, like) {
+    const pattern = like ? likePattern(text) : reEsc(text);
+    if (!pattern) return;
+    settings.hideRules = settings.hideRules || [];
+    if (!settings.hideRules.some((r) => r.pattern === pattern)) settings.hideRules.push({ pattern, example: text.slice(0, 120), on: true });
+    else settings.hideRules.forEach((r) => { if (r.pattern === pattern) r.on = true; });
+    if (settings.showHidden) settings.showHidden = false;
+    refreshHidden();
+    const n = active ? hiddenRanges(active).length : 0;
+    toast('Hidden ' + n.toLocaleString() + ' place' + (n === 1 ? '' : 's') + ' in this tab. The file is unchanged; manage it in Highlight > Hidden text, or click "Hidden" in the status bar.', 5000);
+  }
+  function removeText(text, like) {
+    if (!active) return;
+    const pattern = like ? likePattern(text) : reEsc(text);
+    let ms = [];
+    try { ms = active.model.findMatches(pattern, false, true, true, null, false, 200000); } catch { return; }
+    if (!ms.length) { toast('Nothing to remove.'); return; }
+    editor.pushUndoStop();
+    active.model.pushEditOperations(editor.getSelections(), ms.map((m) => ({ range: m.range, text: '' })), () => null);
+    editor.pushUndoStop();
+    toast('Removed ' + ms.length.toLocaleString() + ' place' + (ms.length === 1 ? '' : 's') + ' from this tab. Ctrl+Z puts them back.', 5000);
+  }
+  // The "Hide…" menu (selection toolbar and right-click)
+  function hideMenu(text, x, y) {
+    const t = text.replace(/\r?\n[\s\S]*$/, '');
+    if (!t.trim()) { toast('Select the part of a line you want to hide.'); return; }
+    const like = likePattern(t), exact = reEsc(t);
+    const short = t.length > 32 ? t.slice(0, 30) + '…' : t;
+    showMenu([
+      ['Hide "' + short + '" in every line', () => addHideRule(t, false)],
+      like !== exact ? ['Hide text like this (any ' + (/[\\/]/.test(t) ? 'path' : 'value') + ' of this shape)', () => addHideRule(t, true)] : undefined,
+      null,
+      ['Remove "' + short + '" from every line', () => removeText(t, false)],
+      like !== exact ? ['Remove text like this from every line', () => removeText(t, true)] : undefined,
+    ], x, y);
+  }
+  function updateHiddenChip() {
+    const chip = $('#st-hidden');
+    if (!chip) return;
+    const n = active && active.hiddenCount ? active.hiddenCount : 0;
+    chip.hidden = !n;
+    chip.classList.toggle('on', !settings.showHidden);
+    chip.textContent = settings.showHidden ? 'Hidden text shown' : 'Hidden: ' + n.toLocaleString();
+    chip.title = settings.showHidden ? 'Hide those parts again' : n.toLocaleString() + ' parts of lines are hidden by your rules. Click to show them.';
   }
 
   // ---------- timeline strip (0.18.1, after tracepad) ----------
@@ -3308,12 +3435,38 @@
     };
     drawRules();
     v.append(
+      hiddenTextSection(),
       h('div', { class: 'group' }, h('h3', null, 'Highlight rules'),
         h('p', { class: 'hint' }, 'Any regex, any colour. Rules apply to every open tab and also show as hover labels.'),
         list,
         h('div', { class: 'row', style: 'margin-top:12px' },
           h('button', { onclick: () => { settings.rules.push({ label: '', pattern: '', color: ACCENTS[settings.rules.length % ACCENTS.length], ci: true, on: true }); drawRules(); refresh(); } }, 'Add rule'),
           h('button', { class: 'ghost', onclick: () => { settings.rules = JSON.parse(JSON.stringify(DEFAULT_RULES)); drawRules(); refresh(); } }, 'Reset to defaults'))));
+  }
+
+  function hiddenTextSection() {
+    const rules = settings.hideRules || [];
+    const save = debounce(refreshHidden, 300);
+    const list = h('div', { class: 'hide-list' });
+    rules.forEach((r, i) => {
+      const bad = !!r.pattern && !safeRegex(r.pattern).re;
+      list.append(h('div', { class: 'hide-rule' + (r.on ? '' : ' off') },
+        h('input', { type: 'checkbox', checked: r.on, title: 'On / off', onchange: (e) => { r.on = e.target.checked; refreshHidden(); } }),
+        h('div', { class: 'hide-main' },
+          h('input', { type: 'text', class: 'hide-pat' + (bad ? ' bad' : ''), value: r.pattern, spellcheck: false, title: 'Regular expression', 'aria-label': 'Pattern to hide',
+            oninput: (e) => { r.pattern = e.target.value; e.target.classList.toggle('bad', !!r.pattern && !safeRegex(r.pattern).re); save(); } }),
+          r.example ? h('span', { class: 'hide-ex', title: r.example }, 'from: ' + r.example) : null),
+        h('button', { class: 'icon-btn small', title: 'Delete this rule', 'aria-label': 'Delete this rule', html: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+          onclick: () => { rules.splice(i, 1); refreshHidden(); } })));
+    });
+    return h('div', { class: 'group' },
+      h('h3', null, 'Hidden text'),
+      h('p', { class: 'hint' }, rules.length ? 'These parts are hidden in every line of every tab; the files are unchanged. Copy shown leaves them out.' : 'Select part of a line (a file name, a path, a thread) and choose Hide… on the toolbar above it, or right-click > Hide this text in every line.'),
+      list,
+      h('div', { class: 'row', style: 'margin-top:8px' },
+        h('label', { class: 'check', style: 'margin:0' }, h('input', { type: 'checkbox', checked: !!settings.showHidden, onchange: (e) => { settings.showHidden = e.target.checked; refreshHidden(); } }), 'Show hidden text'),
+        h('span', { class: 'grow' }),
+        h('button', { onclick: () => { settings.hideRules.push({ pattern: '', example: '', on: true }); renderHighlight(); } }, 'Add rule')));
   }
 
   // ---------- appearance ----------
@@ -3518,6 +3671,8 @@
       btn('Table from selection', 'Open the selected lines as an editable table (Ctrl+Shift+T)', openTableView),
       btn('Copy masked', 'Copy with secrets masked', () => editor.getAction('tf.copyMasked').run()),
       onlyBtn,
+      h('button', { class: 'sb-btn', title: 'Hide or remove this text in every line (a file name, a path, a prefix…)', onmousedown: (e) => e.preventDefault(),
+        onclick: (e) => { e.preventDefault(); const t = selectedText(); const b = e.currentTarget.getBoundingClientRect(); hide(); hideMenu(t, b.left, b.bottom + 4); } }, 'Hide…'),
       btn('Ask Copilot', 'Ask Copilot about the selected lines (secrets are masked first)', () => askCopilot('explain'), 'sb-cp'));
     const widget = {
       getId: () => 'tf.selbar',
@@ -4887,6 +5042,8 @@
       ...(fsEl ? [['Exit full screen', 'View', 'Esc', exitFullscreen]] : []),
       ['Rename tab', 'File', 'double-click a tab', () => active && startRename(active)],
       [document.body.classList.contains('focus-mode') ? 'Leave focus mode' : 'Focus mode: just the editor', 'View', 'Alt+M', () => toggleFocusMode()],
+      [settings.showHidden ? 'Hide the hidden text again' : 'Show hidden text', 'View', '', () => { settings.showHidden = !settings.showHidden; refreshHidden(); }],
+      ['Hidden text rules (manage)', 'View', '', () => showView('highlight', { toggle: false })],
       ['Toggle sidebar', 'View', 'Ctrl+B', () => (currentView ? hideSide() : showView(settings.view || 'insights', { toggle: false }))],
       ['Appearance and settings', 'View', 'Ctrl+,', () => showView('appearance', { toggle: false })],
       ['Keyboard shortcuts', 'Help', '', showHelp],
@@ -5188,6 +5345,14 @@
       run: () => { const t = tokenAtCursor(); if (!t) return; const cur = filterLines(active.filter.trace); if (!cur.includes(t)) cur.push(t); setFilter({ trace: cur.join('\n') }); if (currentView === 'insights') renderInsights(); } });
     editor.addAction({ id: 'tf.hideLike', label: 'Hide entries containing this', contextMenuGroupId: '0_tf', contextMenuOrder: 2,
       run: () => { const t = tokenAtCursor(); if (!t) return; const ex = filterLines(active.filter.exclude); ex.push(t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')); setFilter({ exclude: ex.join('\n') }); if (currentView === 'insights') renderInsights(); } });
+    editor.addAction({ id: 'tf.hideText', label: 'Hide this text in every line…', contextMenuGroupId: '0_tf', contextMenuOrder: 3,
+      run: () => {
+        const t = tokenAtCursor();
+        const p = editor.getPosition();
+        const v = editor.getScrolledVisiblePosition(p) || { left: 0, top: 0, height: 18 };
+        const r = editor.getDomNode().getBoundingClientRect();
+        hideMenu(t || '', r.left + v.left, r.top + v.top + v.height + 4);
+      } });
     editor.addAction({ id: 'tf.explain', label: 'Ask Copilot: explain this error', contextMenuGroupId: '1_copilot', contextMenuOrder: 1, run: () => askCopilot('explain') });
     editor.addAction({ id: 'tf.rootcause', label: 'Ask Copilot: find root cause', contextMenuGroupId: '1_copilot', contextMenuOrder: 2, run: () => askCopilot('rootcause') });
     editor.addAction({ id: 'tf.summarize', label: 'Ask Copilot: summarize log', contextMenuGroupId: '1_copilot', contextMenuOrder: 3, run: () => askCopilot('summarize') });
@@ -5228,7 +5393,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { likePattern, addHideRule, removeText, hiddenRanges: () => (active ? hiddenRanges(active).length : 0), refreshHidden, zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
