@@ -180,7 +180,7 @@ node test/autotables.e2e.js    # 10
 node test/layout.e2e.js        # 16  sidebar, density, split basics, timeline drag
 node test/workspace.e2e.js     # 22  panel resize, tab rename/reorder, multi-pane split, shared filters/search
 node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
-node test/files.e2e.js         # 19  Open files list
+node test/files.e2e.js         # 21  Open files list, shortcuts
 node test/fullscreen.e2e.js    # 38  resize and full screen everywhere, including appearance checks
 node test/incident.e2e.js      # 45  incident view: lanes, findings, time window, reader, jump to a line, requests, pins and report, phone
 node test/querybar.e2e.js      # 75  log bar, Log insights, zoom/ticks, Copy menu, Compare with… (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge

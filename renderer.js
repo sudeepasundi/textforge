@@ -2797,13 +2797,9 @@
       ul.append(item);
     }
     if (!list.length) ul.append(h('div', { class: 'msg' }, q ? 'No open file matches "' + filesState.q + '".' : 'No files open.'));
-    const saved = tabs.filter((t) => !isDirty(t));
     v.append(ul,
-      h('div', { class: 'fl-foot' },
-        h('button', { onclick: () => actions.new() }, 'New tab'),
-        h('button', { onclick: () => actions.open() }, 'Open a file…'),
-        h('button', { title: 'Close every tab without unsaved changes', disabled: saved.length === 0 || saved.length === tabs.length && tabs.length === 1, onclick: async () => { for (const t of saved.slice()) if (tabs.length > 1 || t.model.getValueLength()) await closeTab(t); } }, 'Close saved')),
-      canReorder ? h('p', { class: 'hint' }, 'Drag files to change their order, or drag one onto the editor to show it side by side.') : h('p', { class: 'hint' }, 'Switch to "Tab order" with no filter to drag files into a new order.'));
+      canReorder ? h('p', { class: 'hint fl-hint' }, 'Drag files to change their order, or drag one onto the editor to show it side by side.') : h('p', { class: 'hint fl-hint' }, 'Switch to "Tab order" with no filter to drag files into a new order.'),
+      quickShortcuts());
     const nl = v.querySelector('.fl-list');
     if (nl) nl.scrollTop = prevScroll;
     if (searchFocused) { search.focus(); if (caret != null) search.setSelectionRange(caret, caret); }
@@ -4816,6 +4812,7 @@
       ['Save', 'File', 'Ctrl+S', actions.save],
       ['Save as', 'File', 'Ctrl+Shift+S', actions.saveAs],
       ['Close tab', 'File', 'Ctrl+W', actions.close],
+      ['Close saved tabs (every tab without unsaved changes)', 'File', '', async () => { for (const t of tabs.filter((x) => !isDirty(x))) if (tabs.length > 1 || t.model.getValueLength()) await closeTab(t); }],
       ['Open files: list every open file', 'View', 'Ctrl+Shift+E', () => showView('files', { toggle: false })],
       ['Log insights: filters, levels, repeated errors', 'Logs', 'Ctrl+1', () => showView('insights', { toggle: false })],
       ['Auto tables: build tables from this log', 'Logs', '', () => { extractState.preset = 'auto'; if (currentView === 'extract') renderExtract(); return runAutoTables(); }],
@@ -4887,6 +4884,29 @@
     let j = 0;
     for (let k = 0; k < t.length && j < q.length; k++) if (t[k] === q[j]) { idx.push(k); j++; }
     return j === q.length ? { score: 100 - (idx[idx.length - 1] - idx[0]), idx } : null;
+  }
+
+  // Shortcuts at the bottom of the Open files view (0.18.2): the commands people reach for most, with their keys,
+  // one click away instead of searching the command palette. Log-only ones show when the tab is a log.
+  const QUICK = [
+    ['Filter the log', 'Filter the log', true], ['Next error', 'Next error', true], ['Auto tables', 'Auto tables', true],
+    ['Investigate logs together', 'Investigate logs together', false], ['Compare with another tab', 'Compare with…', false],
+    ['Split view: show', 'Split view', false], ['Close split view', 'Close split view', false], ['Find in all open tabs', 'Find in all tabs', false],
+    ['Table view of selection', 'Table from selection', false], ['Toggle preview', 'Preview', false], ['Open Copilot panel', 'Copilot', false],
+  ];
+  function quickShortcuts() {
+    const log = !!(active && isLogTab(active));
+    const cmds = commands();
+    const rows = [{ label: 'Search all commands', key: 'Ctrl+Shift+P', run: () => openPalette() }];
+    for (const [prefix, label, logOnly] of QUICK) {
+      if (logOnly && !log) continue;
+      const c = cmds.find((x) => x.label.startsWith(prefix));
+      if (c && !rows.some((x) => x.run === c.run)) rows.push({ label, key: c.key, run: c.run });
+    }
+    return h('section', { class: 'fl-quick', 'aria-label': 'Shortcuts' },
+      h('h3', null, 'Shortcuts'),
+      h('div', { class: 'fl-quick-list' }, rows.map((x) => h('button', { class: 'fl-q', title: x.label + (x.key ? ' (' + x.key + ')' : ''), onclick: () => x.run() },
+        h('span', null, x.label), x.key ? h('kbd', null, x.key.replace(/\+/g, ' ')) : null))));
   }
 
   function openPalette(initial) {

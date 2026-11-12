@@ -126,6 +126,14 @@ const names = (page) => page.evaluate(() => [...document.querySelectorAll('.view
   await page.waitForTimeout(200);
   r = await page.evaluate(() => ({ hscroll: document.documentElement.scrollWidth > innerWidth, items: document.querySelectorAll('.fl-item').length }));
   ok('Works on a phone without sideways scrolling', !r.hscroll && r.items > 5, JSON.stringify(r));
+  // 0.18.2: no New / Open / Close saved buttons (the title bar has them); clickable shortcuts instead
+  r = await page.evaluate(() => { __tf.showView('files', { toggle: false }); const v = document.querySelector('.view[data-view="files"]'); return { buttons: [...v.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => /^(New tab|Open a file…|Close saved)$/.test(t)), quick: [...v.querySelectorAll('.fl-q')].map((b) => b.innerText.replace(/\s+/g, ' ').trim()) }; });
+  ok('Open files has no New tab / Open / Close saved buttons, and lists shortcuts with their keys', r.buttons.length === 0 && /^Search all commands Ctrl Shift P$/.test(r.quick[0]) && r.quick.some((x) => /^Compare with… Alt D$/.test(x)) && r.quick.length >= 8, JSON.stringify(r));
+  await page.click('.view[data-view="files"] .fl-q:has-text("Search all commands")');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => !document.getElementById('palette').hidden);
+  ok('A shortcut runs its command when clicked', r, String(r));
+  await page.keyboard.press('Escape');
   ok('No errors', errors.length === 0, errors.join(' | ') || 'none');
   let pass = 0;
   for (const x of results) { if (x.pass) pass++; console.log((x.pass ? 'PASS ' : 'FAIL ') + x.name + '  —  ' + x.detail); }
