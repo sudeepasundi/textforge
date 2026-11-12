@@ -231,6 +231,8 @@ const fills = (r, w) => r && r.x === 0 && r.y === 0 && r.w === w.w && r.h === w.
   await page.keyboard.press('Escape');
 
   // ---------- phone ----------
+  // the sidebar is a drawer over the editor on a phone: close it first, as a phone user would
+  await page.evaluate(() => { if (!document.getElementById('side').hidden) document.getElementById('side-close').click(); });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(250);
   r = await rect(page, '#preview');

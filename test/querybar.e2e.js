@@ -1,4 +1,4 @@
-/* 0.14.0-0.15.0 (design D): query bar with chips in the title bar, time-range chip, timeline count filters,
+/* 0.14.0-0.18.1: log bar (timeline + filter row with level chips, live text box, More filters) after tracepad, time-range chip, timeline count filters,
  * results tabs, status-bar summary, patterns found, toolbar on selected text, Copilot badge. Usage: node test/querybar.e2e.js [selfhost URL] */
 const path = require('path');
 let playwright;
@@ -13,7 +13,7 @@ const state = (page) => page.evaluate(() => ({
   count: document.querySelector('#filterbar .qb-count').hidden ? '' : document.querySelector('#filterbar .qb-count').textContent,
   shown: __tf.active.an && __tf.active.an.vis ? __tf.active.an.vis.reduce((a, x) => a + x, 0) : null,
   status: document.getElementById('st-filter').hidden ? '' : document.getElementById('st-filter').innerText.replace(/\s+/g, ' '),
-  f: { from: __tf.active.filter.from, to: __tf.active.filter.to, took: __tf.active.filter.took, levels: [...__tf.active.filter.levels], include: __tf.active.filter.include, exclude: __tf.active.filter.exclude, logger: __tf.active.filter.logger, trace: __tf.active.filter.trace },
+  f: { text: __tf.active.filter.text, from: __tf.active.filter.from, to: __tf.active.filter.to, took: __tf.active.filter.took, levels: [...__tf.active.filter.levels], include: __tf.active.filter.include, exclude: __tf.active.filter.exclude, logger: __tf.active.filter.logger, trace: __tf.active.filter.trace },
 }));
 const type = async (page, text) => { await page.keyboard.press('Control+k'); await page.keyboard.type(text); await page.keyboard.press('Enter'); await page.waitForTimeout(250); };
 
@@ -26,34 +26,92 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   await page.evaluate(() => __tf.setTheme('slate'));
   let r;
 
-  // ---- layout ----
+  // ---- layout (0.18.1: the timeline and filters form one log bar under the tabs) ----
   r = await page.evaluate(() => {
     const g = (s) => document.querySelector(s).getBoundingClientRect();
-    const bar = g('#topbar'), q = g('#filterbar'), brand = g('#topbar .brand'), act = g('#topbar .top-actions'), tabs = g('#tabrow'), sig = g('#signal');
-    return { inBar: q.top >= bar.top && q.bottom <= bar.bottom, clear: q.left >= brand.right && q.right <= act.left, w: Math.round(q.width), tabsBelow: tabs.top >= bar.bottom - 1 && tabs.bottom <= sig.top + 1, tabInRow: document.querySelector('#tabrow .tab') !== null };
+    const bar = g('#topbar'), tabs = g('#tabrow'), lb = g('#logbar'), work = g('#work'), strip = g('#signal'), row = g('#filterbar');
+    return { underTabs: lb.top >= tabs.bottom - 1 && lb.bottom <= work.top + 1, noTitleFilter: !document.querySelector('#topbar #qb-input'), tabsBelow: tabs.top >= bar.bottom - 1,
+      stripW: Math.round(strip.width), lbW: Math.round(lb.width), rowH: Math.round(row.height), stripAbove: strip.bottom <= row.top + 1 };
   });
-  ok('The query bar sits in the title bar between the logo and the buttons', r.inBar && r.clear && r.w >= 600, JSON.stringify(r));
-  ok('File tabs have their own row between the title bar and the timeline', r.tabsBelow && r.tabInRow, JSON.stringify(r));
+  ok('The timeline and filters sit together under the file tabs; the title bar has no filter box', r.underTabs && r.noTitleFilter && r.tabsBelow && r.stripAbove, JSON.stringify(r));
+  ok('The timeline uses the full width and the filter row is one line at 1920 px', r.stripW >= r.lbW - 30 && r.rowH <= 46, JSON.stringify(r));
+  r = await page.evaluate(() => ({ chips: [...document.querySelectorAll('#filterbar .lb-lvl')].map((c) => c.innerText.replace(/\s+/g, ' ')), bars: document.querySelectorAll('#signal .lb-bar').length,
+    buckets: __tf.active.an.timeline.buckets.length, start: document.querySelector('#logbar .lb-start').textContent, end: document.querySelector('#logbar .lb-end').textContent,
+    hint: document.querySelector('#logbar .lb-hint').textContent, count: document.querySelector('#filterbar .qb-count').textContent }));
+  ok('Level chips show each level with its count', r.chips.join('|') === 'ERROR 4|WARN 3|INFO 12|DEBUG 1', JSON.stringify(r.chips));
+  ok('The timeline has one bar per time slice, the start and end times, and a hint', r.bars === r.buckets && /10:15:01/.test(r.start) && /10:18:12/.test(r.end) && /drag to filter/.test(r.hint) && r.count === '20 entries', JSON.stringify(r));
 
-  // ---- typing filters ----
+  // ---- level chips ----
+  await page.click('#filterbar .lb-lvl[data-level="ERROR"]');
+  await page.waitForTimeout(200);
+  r = await state(page);
+  let lv = await page.evaluate(() => [...document.querySelectorAll('#filterbar .lb-lvl')].map((c) => c.dataset.level + ':' + (c.classList.contains('on') ? 'on' : c.classList.contains('off') ? 'off' : '-')));
+  ok('Clicking ERROR shows only errors; the other chips look switched off', r.f.levels.join() === 'ERROR' && r.shown === 4 && r.count === '4 of 20 entries' && lv.join() === 'ERROR:on,WARN:off,INFO:off,DEBUG:off', JSON.stringify([r.count, lv]));
+  ok('The status bar says how many entries are shown, with Copy shown and Clear filter', /4 of 20 entries shown/.test(r.status) && /Copy shown/.test(r.status) && /Clear filter/.test(r.status), r.status);
+  await page.click('#filterbar .lb-lvl[data-level="WARN"]');
+  await page.waitForTimeout(200);
+  r = await state(page);
+  ok('Clicking WARN as well adds warnings', r.f.levels.sort().join() === 'ERROR,WARN' && r.shown === 7, JSON.stringify(r.f.levels));
+  await page.click('#filterbar .lb-lvl[data-level="ERROR"]');
+  await page.waitForTimeout(200);
+  r = await state(page);
+  ok('Clicking a pressed chip drops that level', r.f.levels.join() === 'WARN' && r.shown === 3, JSON.stringify(r.f.levels));
+  await page.click('#filterbar .lb-lvl[data-level="INFO"]', { modifiers: ['Shift'] });
+  await page.waitForTimeout(200);
+  r = await state(page);
+  ok('Shift+click shows only that level', r.f.levels.join() === 'INFO' && r.shown === 12, JSON.stringify(r.f.levels));
+  await page.click('#filterbar .qb-clear');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ n: __tf.active.filter.levels.size, clear: document.querySelector('#filterbar .qb-clear').hidden }));
+  ok('Clear filters shows every level again and hides itself', r.n === 6 && r.clear, JSON.stringify(r));
+
+  // ---- the text box filters as you type ----
+  await page.click('#qb-input');
+  await page.keyboard.type('PAYMENT');
+  await page.waitForTimeout(450);
+  r = await state(page);
+  const plain = r.shown;
+  ok('Typing filters live, without pressing Enter (and makes no chip)', r.f.text === 'PAYMENT' && plain > 0 && plain < 20 && r.chips.length === 0 && /of 20 entries/.test(r.count), JSON.stringify(r));
+  await page.click('#filterbar .lb-tog[data-tog="textCase"]');
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => ({ shown: __tf.active.an.vis.reduce((a, x) => a + x, 0), pressed: document.querySelector('#filterbar .lb-tog[data-tog="textCase"]').getAttribute('aria-pressed'), none: document.querySelector('#filterbar .qb-count').classList.contains('none') }));
+  ok('Aa matches case (PAYMENT is not in the log in capitals)', r.pressed === 'true' && r.shown === 0 && r.none, JSON.stringify(r));
+  await page.click('#filterbar .lb-tog[data-tog="textCase"]');
+  await page.fill('#qb-input', 'took \\d{4}ms');
+  await page.waitForTimeout(450);
+  r = await state(page);
+  const literal = r.shown;
+  await page.click('#filterbar .lb-tog[data-tog="textRegex"]');
+  await page.waitForTimeout(250);
+  r = await state(page);
+  ok('.* turns the text into a regular expression', literal === 0 && r.shown === 2, JSON.stringify({ literal, regex: r.shown }));
+  await page.fill('#qb-input', 'took (');
+  await page.waitForTimeout(450);
+  r = await page.evaluate(() => ({ err: document.querySelector('#filterbar .lb-text').classList.contains('has-error'), title: document.querySelector('#filterbar .lb-text').title }));
+  ok('An invalid regex marks the box red and says why', r.err && /Invalid regex/.test(r.title), JSON.stringify(r));
+  await page.click('#filterbar .lb-tog[data-tog="textRegex"]');
+  await page.focus('#qb-input');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+  r = await state(page);
+  ok('Esc empties the box and its filter', !r.f.text && r.shown === null, JSON.stringify(r.f));
+
+  // ---- query syntax still works: Enter turns it into chips ----
+  await page.evaluate(() => __tf.editor.focus());
   await page.keyboard.press('Control+k');
   r = await page.evaluate(() => ({ focus: document.activeElement && document.activeElement.id, help: !document.querySelector('#filterbar .qb-help').hidden, ex: document.querySelectorAll('#filterbar .qb-ex').length }));
-  ok('Ctrl+K puts the cursor in the query bar and shows examples', r.focus === 'qb-input' && r.help && r.ex >= 6, JSON.stringify(r));
-  await page.keyboard.type('level:error');
+  ok('Ctrl+K puts the cursor in the filter box and shows examples', r.focus === 'qb-input' && r.help && r.ex >= 6, JSON.stringify(r));
+  await page.keyboard.type('level:warn+ logger:OrderService -validation');
   await page.keyboard.press('Enter');
   await page.waitForTimeout(250);
   r = await state(page);
-  ok('level:error becomes a chip and shows only errors', r.chips.includes('level: error') && r.f.levels.join() === 'ERROR' && r.shown === 4 && r.count === '4 of 20', JSON.stringify(r));
-  ok('The status bar says how many entries are shown, with Copy shown and Clear filter', /4 of 20 entries shown/.test(r.status) && /Copy shown/.test(r.status) && /Clear filter/.test(r.status), r.status);
-  r = await page.evaluate(() => ({ focus: document.activeElement && document.activeElement.id, value: document.getElementById('qb-input').value }));
-  ok('After Enter the box is empty and still focused for the next filter', r.focus === 'qb-input' && r.value === '', JSON.stringify(r));
+  ok('Several parts at once: level:warn+, logger:, -word (levels show on the chips, the rest as chips in the box)', r.f.levels.sort().join() === 'ERROR,WARN' && r.f.logger === 'OrderService' && r.f.exclude === 'validation' && r.chips.length === 2, JSON.stringify(r));
+  r = await page.evaluate(() => ({ focus: document.activeElement && document.activeElement.id, value: document.getElementById('qb-input').value, more: document.querySelector('#filterbar .lb-more').innerText.trim() }));
+  ok('After Enter the box is empty and still focused; More filters counts what is set', r.focus === 'qb-input' && r.value === '' && r.more === 'More filters (2)', JSON.stringify(r));
   await page.keyboard.press('Backspace');
   await page.waitForTimeout(200);
   r = await state(page);
-  ok('Backspace in the empty box removes the last chip', r.chips.length === 0 && r.f.levels.length === 6, JSON.stringify(r));
-  await type(page, 'level:warn+ logger:OrderService -validation');
-  r = await state(page);
-  ok('Several parts at once: level:warn+, logger:, -word', r.f.levels.sort().join() === 'ERROR,WARN' && r.f.logger === 'OrderService' && r.f.exclude === 'validation' && r.chips.length === 3, JSON.stringify(r));
+  ok('Backspace in the empty box removes the last chip', r.chips.length === 1 && !r.f.exclude, JSON.stringify(r));
   await page.click('#filterbar .qb-clear');
   await type(page, 'took>1000');
   r = await state(page);
@@ -68,43 +126,81 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   await page.click('#filterbar .qb-clear');
   await type(page, '"Payment call failed"');
   r = await state(page);
-  ok('A quoted phrase is a text filter (shown without regex escapes)', r.chips.includes('text: Payment call failed') && r.shown === 2, JSON.stringify(r));
+  ok('A quoted phrase is a text filter chip (shown without regex escapes)', r.chips.includes('text: Payment call failed') && r.shown === 2, JSON.stringify(r));
   await page.click('#filterbar .qb-clear');
   await type(page, 'level:loud after:noon');
   r = await page.evaluate(() => ({ value: document.getElementById('qb-input').value, toast: document.getElementById('toast').hidden ? '' : document.getElementById('toast').textContent }));
   ok('Parts it does not understand stay in the box with a hint', r.value === 'level:loud after:noon' && /Not understood/.test(r.toast), JSON.stringify(r));
   await page.keyboard.press('Escape');
 
+  // ---- More filters ----
+  await page.click('#filterbar .lb-more');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => ({ open: !document.querySelector('#logbar .lb-advanced').hidden, exp: document.querySelector('#filterbar .lb-more').getAttribute('aria-expanded'), labels: [...document.querySelectorAll('#logbar .lb-advanced .lb-fh > span')].map((x) => x.textContent) }));
+  ok('More filters opens a row with the other filters', r.open && r.exp === 'true' && ['Lines matching', 'Hide lines matching', 'Logger or thread', 'Took at least (ms)', 'Trace IDs', 'From', 'To'].every((l) => r.labels.includes(l)), JSON.stringify(r));
+  await page.click('#logbar .lb-advanced input[data-key="logger"]');
+  await page.keyboard.type('PaymentClient', { delay: 30 });
+  await page.waitForTimeout(450);
+  r = await page.evaluate(() => ({ logger: __tf.active.filter.logger, value: document.querySelector('#logbar .lb-advanced input[data-key="logger"]').value, focus: document.activeElement && document.activeElement.dataset.key, more: document.querySelector('#filterbar .lb-more').innerText.trim() }));
+  ok('Typing in a field filters without losing the cursor', r.logger === 'PaymentClient' && r.value === 'PaymentClient' && r.focus === 'logger' && r.more === 'More filters (1)', JSON.stringify(r));
+  await page.click('#filterbar .qb-clear');
+  await page.waitForTimeout(200);
+
   // ---- time range ----
   await type(page, 'time:10:16..10:17');
   r = await state(page);
   ok('time:10:16..10:17 becomes a time-range chip', r.time && r.chips.includes('time: 10:16 to 10:17') && r.f.from === '10:16' && r.f.to === '10:17', JSON.stringify(r));
-  r = await page.evaluate(() => { const c = document.querySelector('#filterbar .qb-chip.time'); const cs = getComputedStyle(c); return { border: cs.borderTopColor, accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(), icon: !!c.querySelector('svg') }; });
-  ok('The time chip looks different: accent outline and a clock icon', r.icon && r.border !== 'rgba(0, 0, 0, 0)', JSON.stringify(r));
+  r = await page.evaluate(() => { const c = document.querySelector('#filterbar .qb-chip.time'); const cs = getComputedStyle(c); return { border: cs.borderTopColor, icon: !!c.querySelector('svg'), range: !document.querySelector('#signal .range').hidden, from: document.querySelector('#logbar .lb-advanced input[data-key="from"]').value }; });
+  ok('The time chip looks different (accent outline, clock), the range is outlined on the timeline and fills From', r.icon && r.border !== 'rgba(0, 0, 0, 0)' && r.range && r.from === '10:16', JSON.stringify(r));
   await page.click('#filterbar .qb-chip.time .qb-x');
   await page.waitForTimeout(200);
   r = await state(page);
   ok('× on the time chip clears the range', !r.f.from && !r.f.to && !r.time, JSON.stringify(r));
+  await page.click('#filterbar .lb-more');
   const sb = await rect(page, '#signal');
-  await page.mouse.move(sb.x + sb.w * 0.3, sb.y + sb.h * 0.7); await page.mouse.down();
+  await page.mouse.move(sb.x + sb.w * 0.3, sb.y + sb.h * 0.7);
+  await page.waitForTimeout(100);
+  r = await page.evaluate(() => ({ hint: document.querySelector('#logbar .lb-hint').textContent, hover: document.querySelectorAll('#signal .lb-bar.hover').length }));
+  ok('Hovering a bar shows its time and counts', /\d\d:\d\d:\d\d – \d\d:\d\d:\d\d/.test(r.hint) && /entr/.test(r.hint) && r.hover === 1, JSON.stringify(r));
+  await page.mouse.down();
   await page.mouse.move(sb.x + sb.w * 0.55, sb.y + sb.h * 0.7, { steps: 8 }); await page.mouse.up();
   await page.waitForTimeout(300);
   r = await state(page);
-  ok('Dragging on the timeline adds the time chip', r.time && r.f.from && r.f.to && r.shown > 0 && r.shown < 20, JSON.stringify(r));
+  const look = await page.evaluate(() => ({ range: !document.querySelector('#signal .range').hidden, dim: document.querySelectorAll('#signal .lb-bar.dim').length, hint: document.querySelector('#logbar .lb-hint').textContent }));
+  ok('Dragging on the timeline filters by time: chip, outlined range, dimmed bars outside it', r.time && /^\d\d:\d\d:\d\d$/.test(r.f.from) && r.f.to && r.shown > 0 && r.shown < 20 && look.range && look.dim > 0, JSON.stringify([r.f, look]));
+  await page.mouse.move(sb.x + sb.w * 0.8, sb.y - 30);
+  await page.waitForTimeout(100);
+  r = await page.evaluate(() => document.querySelector('#logbar .lb-hint').textContent);
+  ok('The hint then says how to clear the range', /double-click to clear/.test(r), r);
   await page.mouse.dblclick(sb.x + sb.w * 0.8, sb.y + sb.h * 0.7);
   await page.waitForTimeout(300);
   r = await state(page);
-  ok('Double-clicking the timeline removes the time chip', !r.time && !r.f.from && !r.f.to, JSON.stringify(r));
+  ok('Double-clicking the timeline removes the range', !r.time && !r.f.from && !r.f.to, JSON.stringify(r));
+  const errX = await page.evaluate(() => { const tl = __tf.active.an.timeline; const i = tl.buckets.findIndex((b) => b.error); const s = document.getElementById('signal').getBoundingClientRect(); return s.left + (i + 0.5) * (s.width / tl.buckets.length); });
+  await page.evaluate(() => __tf.editor.setPosition({ lineNumber: 1, column: 1 }));
+  await page.mouse.click(errX, sb.y + sb.h * 0.7);
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => { const ln = __tf.editor.getPosition().lineNumber; return { ln, text: __tf.active.model.getLineContent(ln).slice(0, 60) }; });
+  ok('Clicking a bar with errors jumps to the error', r.ln > 1 && /ERROR/.test(r.text), JSON.stringify(r));
 
-  // ---- timeline counts ----
-  await page.click('#signal .sig-pill.e');
-  await page.waitForTimeout(200);
-  r = await page.evaluate(() => ({ levels: [...__tf.active.filter.levels], pressed: document.querySelector('#signal .sig-pill.e').getAttribute('aria-pressed'), from: __tf.active.filter.from }));
-  ok('Clicking "4 errors" on the timeline shows only errors (and does not set a time range)', r.levels.join() === 'ERROR' && r.pressed === 'true' && !r.from, JSON.stringify(r));
-  await page.click('#signal .sig-pill.e');
-  await page.waitForTimeout(200);
-  r = await page.evaluate(() => [...__tf.active.filter.levels].length);
-  ok('Clicking it again shows every level', r === 6, String(r));
+  // ---- error buttons, Auto tables ----
+  await page.evaluate(() => __tf.editor.setPosition({ lineNumber: 1, column: 1 }));
+  await page.click('#filterbar .lb-next');
+  await page.waitForTimeout(150);
+  const n1 = await page.evaluate(() => __tf.editor.getPosition().lineNumber);
+  await page.click('#filterbar .lb-next');
+  await page.waitForTimeout(150);
+  const n2 = await page.evaluate(() => __tf.editor.getPosition().lineNumber);
+  await page.click('#filterbar .lb-prev');
+  await page.waitForTimeout(150);
+  const n3 = await page.evaluate(() => __tf.editor.getPosition().lineNumber);
+  r = await page.evaluate((l) => l.map((x) => /ERROR/.test(__tf.active.model.getLineContent(x))), [n1, n2, n3]);
+  ok('The arrow buttons go to the next and previous error', r.every(Boolean) && n2 > n1 && n3 === n1, JSON.stringify({ n1, n2, n3 }));
+  await page.click('#filterbar .lb-auto');
+  await page.waitForTimeout(500);
+  r = await page.evaluate(() => ({ panel: !document.getElementById('panel').hidden, list: !!document.querySelector('#panel-body .at-list') }));
+  ok('Auto tables in the filter row builds the tables', r.panel && r.list, JSON.stringify(r));
+  await page.evaluate(() => __tf.closePanel && __tf.closePanel());
 
   // ---- commands and plain files ----
   await type(page, '>split');
@@ -113,9 +209,10 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   await page.keyboard.press('Escape');
   await page.evaluate(() => __tf.activate(__tf.newTab({ name: 'notes.md', content: 'alpha\nbeta gamma\nbeta' })));
   await page.waitForTimeout(200);
-  await type(page, 'beta');
-  r = await page.evaluate(() => { const fc = __tf.editor.getContribution('editor.contrib.findController'); const st = fc.getState(); return { str: st.searchString, revealed: st.isRevealed, matches: st.matchesCount, ph: document.getElementById('qb-input').placeholder }; });
-  ok('In a file that is not a log, the box finds text', r.str === 'beta' && r.revealed && r.matches === 2 && /Find/.test(r.ph), JSON.stringify(r));
+  await page.keyboard.press('Control+k');
+  await page.waitForTimeout(200);
+  r = await page.evaluate(() => { const fc = __tf.editor.getContribution('editor.contrib.findController'); return { logbar: document.getElementById('logbar').hidden, revealed: fc.getState().isRevealed }; });
+  ok('A file that is not a log has no log bar; Ctrl+K opens Find instead', r.logbar && r.revealed, JSON.stringify(r));
   await page.keyboard.press('Escape');
   await page.evaluate(() => { __tf.activate(__tf.tabs.find((t) => /sample/.test(t.name))); });
   await page.waitForTimeout(200);
@@ -146,7 +243,9 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   r = await page.evaluate(() => ({ panel: !document.getElementById('panel').hidden, sel: __tf.autoState && __tf.autoState.selected && __tf.autoState.selected.count, on: [...document.querySelectorAll('.pf-item')].findIndex((x) => x.classList.contains('on')), rows: document.querySelectorAll('#panel-body table tr').length }));
   ok('One click on a pattern opens its table under the editor and marks it in the list', r.panel && r.sel > 0 && r.on === 1 && r.rows > 1, JSON.stringify(r));
   await page.evaluate(() => __tf.hideSide && __tf.hideSide());
-  const sel = await page.evaluate(() => { const ed = __tf.editor; ed.revealLineInCenter(9); const a = ed.getScrolledVisiblePosition({ lineNumber: 9, column: 1 }); const c = ed.getScrolledVisiblePosition({ lineNumber: 10, column: 40 }); const r = ed.getDomNode().getBoundingClientRect(); return { x1: r.left + a.left + 2, y1: r.top + a.top + 5, x2: r.left + c.left, y2: r.top + c.top + 5, line9: r.top + a.top }; });
+  await page.evaluate(() => __tf.editor.revealLineInCenter(9));
+  await page.waitForTimeout(250);
+  const sel = await page.evaluate(() => { const ed = __tf.editor; const a = ed.getScrolledVisiblePosition({ lineNumber: 9, column: 1 }); const c = ed.getScrolledVisiblePosition({ lineNumber: 10, column: 40 }); const r = ed.getDomNode().getBoundingClientRect(); return { x1: r.left + a.left + 2, y1: r.top + a.top + 5, x2: r.left + c.left, y2: r.top + c.top + 5, line9: r.top + a.top }; });
   await page.mouse.move(sel.x1, sel.y1); await page.mouse.down(); await page.mouse.move(sel.x2, sel.y2, { steps: 6 }); await page.mouse.up();
   await page.waitForTimeout(450);
   r = await page.evaluate(() => { const n = document.querySelector('.selbar'); const b = n.getBoundingClientRect(); return { on: n.classList.contains('on'), btns: [...n.querySelectorAll('.sb-btn')].filter((x) => !x.hidden).map((x) => x.textContent), bottom: b.bottom }; });
@@ -180,23 +279,68 @@ const type = async (page, text) => { await page.keyboard.press('Control+k'); awa
   await page.evaluate(() => { __tf.activate(__tf.tabs.find((t) => /sample/.test(t.name))); });
   await page.waitForTimeout(200);
 
+  // ---- 0.18.1: Copy as table, Copy CSV and Open as new tab in the results ----
+  await page.evaluate(() => { window.__copied = []; window.__realClip = window.api.clipboardWrite; window.api.clipboardWrite = async (x) => { window.__copied.push(x); return true; }; __tf.autoTables(); });
+  await page.waitForTimeout(500);
+  await page.click('.at-item >> nth=1');
+  await page.waitForTimeout(200);
+  await page.click('#panel-tools button:has-text("Copy as table")');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => { const c = window.__copied[window.__copied.length - 1]; const rows = document.querySelectorAll('#panel-body table.grid tr').length - 1; return { lines: c.text.split('\n').filter(Boolean), html: /<table/i.test(c.html || ''), rows, toast: document.getElementById('toast').textContent }; });
+  ok('Copy as table copies every row with the Line column, as a real table', r.lines.length === r.rows + 1 && /^Line\t/.test(r.lines[0]) && /^\d+\t/.test(r.lines[1]) && r.html && /Copied \d+ rows/.test(r.toast), JSON.stringify(r));
+  await page.click('#panel-tools button:has-text("Copy CSV")');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => window.__copied[window.__copied.length - 1].text.split('\n')[0]);
+  ok('Copy CSV starts with the header row, Line first', /^Line,/.test(r), r);
+  const nTabs = await page.evaluate(() => __tf.tabs.length);
+  await page.click('#panel-tools button:has-text("Open as new tab")');
+  await page.waitForTimeout(300);
+  r = await page.evaluate(() => ({ n: __tf.tabs.length, name: __tf.active.name, lines: __tf.active.model.getLineCount(), first: __tf.active.model.getLineContent(1) }));
+  ok('Open as new tab opens the rows as CSV in a new tab', r.n === nTabs + 1 && /-table\.csv$/.test(r.name) && r.lines >= 3 && /^Line,/.test(r.first), JSON.stringify(r));
+  // a pattern with no variable parts (Markdown table rows) still copies its lines
+  await page.evaluate(() => __tf.activate(__tf.newTab({ name: 'keys.md', content: '| Shortcut | Action |\n|---|---|\n| Ctrl+K | Filter |\n| F8 | Next error |\n\nSome text here.\n', lang: 'markdown' })));
+  await page.evaluate(() => __tf.autoTables());
+  await page.waitForTimeout(400);
+  r = await page.evaluate(() => [...document.querySelectorAll('.at-item')].length);
+  let copiedEmpty = false;
+  for (let i = 0; i < r; i++) {
+    await page.click(`.at-item >> nth=${i}`);
+    await page.waitForTimeout(120);
+    await page.click('#panel-tools button:has-text("Copy as table")');
+    await page.waitForTimeout(80);
+    const c = await page.evaluate(() => window.__copied[window.__copied.length - 1].text.split('\n').filter(Boolean));
+    if (c.length < 2 || c.slice(1).every((l) => !l.split('\t').slice(1).join('').trim())) copiedEmpty = true;
+  }
+  ok('Every pattern copies something, including ones with no columns (the line text is used)', r > 0 && !copiedEmpty, 'patterns ' + r);
+  await page.evaluate(() => { window.api.clipboardWrite = async () => false; });
+  await page.click('#panel-tools button:has-text("Copy as table")');
+  await page.waitForTimeout(150);
+  r = await page.evaluate(() => document.getElementById('toast').textContent);
+  ok('When the clipboard is blocked it says so instead of claiming it copied', /Could not copy/.test(r), r);
+  await page.evaluate(() => { window.api.clipboardWrite = window.__realClip; __tf.activate(__tf.tabs.find((t) => /sample/.test(t.name))); });
+  await page.waitForTimeout(200);
+
   // ---- appearance: light theme and phone ----
-  await page.evaluate(() => { __tf.setTheme('paper'); __tf.applyQuery('level:error'); });
+  await page.evaluate(() => { __tf.setTheme('paper'); __tf.applyQuery('logger:OrderService'); __tf.setFilter({ levels: new Set(['ERROR']) }); });
   await page.waitForTimeout(200);
   r = await page.evaluate(() => {
-    const chip = document.querySelector('#filterbar .qb-chip');
     const lum = (c) => { const m = c.match(/\d+(\.\d+)?/g).map(Number); const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(m[0]) + 0.7152 * f(m[1]) + 0.0722 * f(m[2]); };
-    const fg = getComputedStyle(chip.querySelector('b')).color; const bg = getComputedStyle(document.getElementById('filterbar')).backgroundColor;
-    const a = lum(fg), b = lum(bg); return { ratio: Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 10) / 10 };
+    const ratio = (fg, bg) => { const a = lum(fg), b = lum(bg); return Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 10) / 10; };
+    const chip = document.querySelector('#filterbar .qb-chip');
+    const lvl = document.querySelector('#filterbar .lb-lvl.on');
+    return { chip: ratio(getComputedStyle(chip.querySelector('b')).color, getComputedStyle(document.querySelector('#filterbar .lb-text')).backgroundColor),
+      count: ratio(getComputedStyle(lvl.querySelector('span')).color, getComputedStyle(lvl).backgroundColor) };
   });
-  ok('Chip text is readable in the light theme (4.5:1 or more)', r.ratio >= 4.5, JSON.stringify(r));
+  ok('Chip text and level counts are readable in the light theme (4.5:1 or more)', r.chip >= 4.5 && r.count >= 4.5, JSON.stringify(r));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(300);
   r = await page.evaluate(() => {
-    const q = document.getElementById('filterbar').getBoundingClientRect(), bar = document.getElementById('topbar').getBoundingClientRect();
-    return { hscroll: document.documentElement.scrollWidth > innerWidth, w: Math.round(q.width), below: q.top > bar.top + 30, chip: !!document.querySelector('#filterbar .qb-chip'), count: !document.querySelector('#filterbar .qb-count').hidden && getComputedStyle(document.querySelector('#filterbar .qb-count')).display !== 'none' };
+    const g = (s) => document.querySelector(s).getBoundingClientRect();
+    const t = g('#filterbar .lb-text'), lv = g('#filterbar .lb-levels'), strip = g('#signal');
+    return { hscroll: document.documentElement.scrollWidth > innerWidth, textW: Math.round(t.width), levels: Math.round(lv.width), stripW: Math.round(strip.width), chip: !!document.querySelector('#filterbar .qb-chip'),
+      count: getComputedStyle(document.querySelector('#filterbar .qb-count')).display !== 'none', nav: getComputedStyle(document.querySelector('#filterbar .lb-nav')).display };
   });
-  ok('On a phone the query bar gets its own full-width row; nothing scrolls sideways', !r.hscroll && r.w >= 360 && r.below && r.chip && r.count, JSON.stringify(r));
+  ok('On a phone the chips, the filter box and the timeline each get the full width; nothing scrolls sideways', !r.hscroll && r.textW >= 300 && r.levels >= 300 && r.stripW >= 300 && r.chip && r.count && r.nav === 'none', JSON.stringify(r));
   await page.click('#qb-input');
   await page.waitForTimeout(150);
   r = await page.evaluate(() => { const h = document.querySelector('#filterbar .qb-help').getBoundingClientRect(); return { l: h.left, r: h.right, vw: innerWidth, shown: h.width > 0 }; });

@@ -306,3 +306,22 @@ PIN WHAT MATTERS, SHARE THE REPORT (0.18.0)
   editing. Each finding brings a few evidence lines with their file and line number.
   Secrets are masked in everything you copy. Closing the incident with pinned items asks
   first; switching tabs and coming back (Alt+I) keeps the report.
+
+TIMELINE AND FILTERS IN ONE BAR (0.18.1)
+  Under the file tabs of a log there is now one bar with the timeline and the filters.
+  Timeline: one bar per slice of time, errors in red and warnings in amber on top. Hover
+  a bar to see its time and counts, click it to jump there (to its first error), drag
+  across bars to show only that time range (it is outlined; double-click to clear). Bars
+  the filter hides are faded.
+  Filters: click ERROR, WARN, INFO... to show only those levels (click more to add them,
+  Shift+click for just one). Type in "Filter entries" and the log filters as you type;
+  Aa matches case, .* uses a regular expression. Typing level:error, took>1000, -noise or
+  "a phrase" and pressing Enter still works and shows a chip. "More filters" opens lines
+  matching, hide lines, logger or thread, duration, trace IDs and From / To. The count,
+  "Clear filters", Auto tables and the previous / next error arrows sit on the same row.
+  Ctrl+K puts the cursor in the filter box (in other files it opens Find).
+  Fixed: in the results under the editor, Copy as table, Copy CSV and Open as new tab
+  copied nothing for patterns without columns and left out the line numbers. They now
+  copy every row with its Line, and say so when the browser blocks the clipboard.
+  Jumping to an error or a result line keeps the start of the line (time and level) in
+  view instead of scrolling to the end of a long line.

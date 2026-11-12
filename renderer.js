@@ -1859,7 +1859,7 @@
   // LOG ANALYSIS
   // ======================================================================
   function emptyFilter() {
-    return { levels: new Set(Logs.LEVEL_CHIPS), include: '', includeMode: 'any', exclude: '', logger: '', trace: '', from: '', to: '', took: '' };
+    return { levels: new Set(Logs.LEVEL_CHIPS), include: '', includeMode: 'any', exclude: '', logger: '', trace: '', from: '', to: '', took: '', text: '', textCase: false, textRegex: false };
   }
   // Multi-line filter boxes: each non-empty line is one pattern.
   const filterLines = (v) => String(v || '').split('\n').map((x) => x.trim()).filter(Boolean);
@@ -1874,7 +1874,13 @@
   }
 
   function filterActive(f) {
-    return !!f.lines || f.levels.size !== Logs.LEVEL_CHIPS.length || filterLines(f.include).length || filterLines(f.exclude).length || f.logger || filterLines(f.trace).length || f.from || f.to || !!f.took;
+    return !!f.lines || f.levels.size !== Logs.LEVEL_CHIPS.length || filterLines(f.include).length || filterLines(f.exclude).length || f.logger || filterLines(f.trace).length || f.from || f.to || !!f.took || !!String(f.text || '').trim();
+  }
+  // The live text box of the filter row: plain text, or a regular expression with .*; Aa matches case.
+  function textQuery(f) {
+    const t = String(f.text || '').trim();
+    if (!t) return { re: null };
+    try { return { re: new RegExp(f.textRegex ? t : reEscape(t), f.textCase ? '' : 'i') }; } catch (e) { return { re: null, error: e.message }; }
   }
   function safeRegex(src) {
     if (!src) return { re: null };
@@ -1906,7 +1912,8 @@
     if (!filterActive(f)) return;
     const inc = linesRegex(f.include, f.includeMode);
     const exc = linesRegex(f.exclude, 'any');
-    an.filterError = inc.error || exc.error || null;
+    const tq = textQuery(f);
+    an.filterError = inc.error || exc.error || (tq.error ? 'filter text: ' + tq.error : null);
     const ref = an.entries.find((e) => e.ts != null);
     const ids = filterLines(f.trace);
     const trace = ids.length ? ids : '';
@@ -1938,6 +1945,14 @@
         if (!an.vis[i]) return;
         const m = TOOK_RE.exec(an.lines[e.start] || '');
         if (!m || tookMs(m) < min) an.vis[i] = 0;
+      });
+    }
+    if (an.vis && tq.re) {
+      an.entries.forEach((e, i) => {
+        if (!an.vis[i]) return;
+        let hit = false;
+        for (let l = e.start; l <= e.end && !hit; l++) hit = tq.re.test(an.lines[l]);
+        if (!hit) an.vis[i] = 0;
       });
     }
   }
@@ -2024,7 +2039,10 @@
 
   function clearFilter() {
     if (!active) return;
-    active.filter = emptyFilter();
+    const old = active.filter || {};
+    active.filter = Object.assign(emptyFilter(), { textCase: !!old.textCase, textRegex: !!old.textRegex });
+    const input = $('#qb-input');
+    if (input) input.value = '';
     setFilter({});
     if (currentView === 'insights') renderInsights();
   }
@@ -2064,7 +2082,6 @@
       chips.push({ key: 'time', val: (f.from ? shortTime(f.from) : 'start') + ' to ' + (f.to ? shortTime(f.to) : 'end'), time: true,
         title: 'Drag on the timeline to change the range. Double-click the timeline, or ×, to clear it.', clear: { from: '', to: '' } });
     }
-    if (f.levels.size !== Logs.LEVEL_CHIPS.length) chips.push({ key: 'level', val: Array.from(f.levels).map((x) => x.toLowerCase()).join(', ') || 'none', clear: { levels: new Set(Logs.LEVEL_CHIPS) } });
     if (f.logger) chips.push({ key: 'logger', val: f.logger, clear: { logger: '' } });
     const ids = filterLines(f.trace);
     if (ids.length) chips.push({ key: 'trace', val: ids.length === 1 ? ids[0] : ids.length + ' IDs', title: ids.join('\n'), clear: { trace: '' } });
@@ -2075,39 +2092,103 @@
     return chips;
   }
 
-  function renderFilterBar() {
-    const bar = $('#filterbar');
-    const box = bar.querySelector('.qb-chips');
-    const input = $('#qb-input');
-    const cnt = bar.querySelector('.qb-count');
-    const clr = bar.querySelector('.qb-clear');
-    const st = $('#st-filter');
-    const log = !!(active && isLogTab(active));
-    const an = log ? active.an : null;
-    const filtering = !!(an && filterActive(active.filter));
-    input.placeholder = !log ? 'Find in this tab, or type > for a command'
-      : filtering ? 'Add a filter…' : 'Filter: level:error  logger:Payment  took>1000  after:10:15  -noise';
+  // ---------- filter row (0.18.1, after tracepad): level chips, text box, More filters, count ----------
+  // Typed text that uses the query syntax (level:, took>, -word, "a phrase", >command) is added on Enter;
+  // anything else filters live as you type.
+  const QUERY_LIKE = /(^|\s)(-\S|[a-z]+(:|>=|>)\S|>)|"/i;
+  const isQueryLike = (v) => QUERY_LIKE.test(v.trim());
+  const LEVEL_NAMES = { ERROR: 'ERROR', WARN: 'WARN', INFO: 'INFO', DEBUG: 'DEBUG', TRACE: 'TRACE', OTHER: 'OTHER' };
+  let moreOpen = false;
+
+  function shownCount(an) { return an.vis ? an.vis.reduce((a, b) => a + b, 0) : an.entries.length; }
+
+  // Level chips: none pressed = every level. Click one to show only it, click others to add them,
+  // click a pressed one to drop it. Shift+click (or double-click) shows only that level.
+  function clickLevel(lvl, only) {
+    const an = active && active.an;
+    if (!an) return;
+    const f = active.filter;
+    const all = f.levels.size === Logs.LEVEL_CHIPS.length;
+    let s;
+    if (only || all) s = all || !(f.levels.size === 1 && f.levels.has(lvl)) ? new Set([lvl]) : new Set(Logs.LEVEL_CHIPS);
+    else { s = new Set(f.levels); if (s.has(lvl)) s.delete(lvl); else s.add(lvl); }
+    const present = Logs.LEVEL_CHIPS.filter((l) => an.counts[l]);
+    if (!s.size || present.every((l) => s.has(l))) s = new Set(Logs.LEVEL_CHIPS);
+    setFilter({ levels: s });
+    if (currentView === 'insights') renderInsights();
+  }
+
+  function renderLevelChips(box, an, f) {
     box.innerHTML = '';
-    if (!filtering) {
-      cnt.hidden = clr.hidden = st.hidden = true;
-      bar.classList.remove('active');
-      return;
+    const all = f.levels.size === Logs.LEVEL_CHIPS.length;
+    for (const lvl of Logs.LEVEL_CHIPS) {
+      const n = an.counts[lvl] || 0;
+      if (!n && (all || !f.levels.has(lvl))) continue;
+      const on = !all && f.levels.has(lvl);
+      const name = LEVEL_NAMES[lvl];
+      box.append(h('button', {
+        class: 'lb-lvl' + (on ? ' on' : !all ? ' off' : ''), 'data-level': lvl, 'aria-pressed': on ? 'true' : 'false',
+        title: all ? 'Show only ' + name + ' (Shift+click to show only one level)' : on ? 'Stop showing ' + name : 'Also show ' + name,
+        onclick: (e) => { if (e.detail > 1) return; clickLevel(lvl, e.shiftKey); },
+        ondblclick: () => clickLevel(lvl, true),
+      }, h('b', null, name), h('span', null, n.toLocaleString())));
     }
-    for (const c of filterChips(active.filter)) {
+  }
+
+  // How many of the filters behind "More filters" are in use.
+  function advancedCount(f) {
+    return [filterLines(f.include).length, filterLines(f.exclude).length, f.logger, filterLines(f.trace).length, f.from || f.to, f.took, f.lines]
+      .filter(Boolean).length;
+  }
+
+  function renderFilterBar() {
+    const logbar = $('#logbar');
+    const bar = $('#filterbar');
+    const log = !!(active && isLogTab(active));
+    const an = log ? analyze(active) : null;
+    logbar.hidden = !an;
+    const st = $('#st-filter');
+    if (!an) { st.hidden = true; return; }
+    const f = active.filter;
+    const input = $('#qb-input');
+    const text = bar.querySelector('.lb-text');
+    const filtering = filterActive(f);
+    renderLevelChips(bar.querySelector('.lb-levels'), an, f);
+    if (document.activeElement !== input) input.value = f.text || '';
+    input.placeholder = window.innerWidth < 900 ? 'Filter entries' : window.innerWidth < 1600 ? 'Filter entries, or level:error + Enter' : 'Filter entries, or level:error  took>1000  -noise and Enter';
+    for (const b of bar.querySelectorAll('.lb-tog')) b.setAttribute('aria-pressed', f[b.dataset.tog] ? 'true' : 'false');
+    text.classList.toggle('has-text', !!String(f.text || '').trim());
+    text.classList.toggle('has-error', !!an.filterError);
+    text.title = an.filterError ? 'Invalid regex: ' + an.filterError : '';
+    // chips for the filters that have no control of their own in the row
+    const box = bar.querySelector('.qb-chips');
+    box.innerHTML = '';
+    for (const c of filterChips(f)) {
       const chip = h('span', { class: 'qb-chip' + (c.time ? ' time' : ''), title: c.title || '' },
         h('span', { class: 'qb-k' }, c.key + (c.op || ':')), h('b', null, c.val),
         h('button', { class: 'qb-x', title: 'Remove', 'aria-label': 'Remove the ' + c.key + ' filter', onclick: (e) => { e.stopPropagation(); setFilter(c.clear); if (currentView === 'insights') renderInsights(); } }, '×'));
       if (c.time) chip.insertAdjacentHTML('afterbegin', CLOCK_SVG);
       box.append(chip);
     }
-    const shown = an.vis ? an.vis.reduce((a, b) => a + b, 0) : an.entries.length;
+    const more = bar.querySelector('.lb-more');
+    const nAdv = advancedCount(f);
+    more.querySelector('span').textContent = 'More filters' + (nAdv ? ' (' + nAdv + ')' : '');
+    more.classList.toggle('has', !!nAdv);
+    more.setAttribute('aria-expanded', moreOpen ? 'true' : 'false');
+    const shown = shownCount(an);
     const total = an.entries.length.toLocaleString();
-    cnt.textContent = shown.toLocaleString() + ' of ' + total;
-    cnt.title = shown.toLocaleString() + ' of ' + total + ' entries shown';
-    cnt.hidden = clr.hidden = false;
-    bar.classList.add('active');
-    bar.classList.toggle('has-error', !!an.filterError);
+    const cnt = bar.querySelector('.qb-count');
+    cnt.innerHTML = '';
+    if (filtering) cnt.append(h('b', null, shown.toLocaleString()), ' of ' + total + ' entries');
+    else cnt.append(total + ' entries');
+    cnt.classList.toggle('none', filtering && shown === 0);
+    cnt.title = (an.formatLabel || 'Log') + ' log' + (filtering && shown === 0 ? '. Nothing matches, so the full log is shown.' : '');
+    bar.querySelector('.qb-clear').hidden = !filtering;
+    bar.classList.toggle('active', filtering);
+    renderAdvanced();
+    // status bar: the same summary, with Copy shown
     st.innerHTML = '';
+    if (!filtering) { st.hidden = true; return; }
     st.append(...[
       h('span', null, h('b', null, shown.toLocaleString()), ' of ' + total + ' entries shown'),
       an.filterError ? h('span', { class: 'st-err' }, 'Invalid regex: ' + an.filterError) : null,
@@ -2117,6 +2198,93 @@
     st.hidden = false;
   }
 
+  // The fields behind "More filters". Rebuilt only when nothing in it has focus, so typing is never interrupted.
+  function renderAdvanced() {
+    const adv = $('#logbar .lb-advanced');
+    adv.hidden = !moreOpen || !(active && active.an);
+    if (adv.hidden || adv.contains(document.activeElement)) return;
+    const f = active.filter;
+    const later = debounce((key, val) => setFilter({ [key]: val }), 250);
+    const area = (key, placeholder) => { const ta = h('textarea', { rows: 2, spellcheck: false, placeholder, 'data-key': key, oninput: (e) => later(key, e.target.value) }); ta.value = f[key] || ''; return ta; };
+    const input = (key, placeholder, extra) => h('input', Object.assign({ type: 'text', value: f[key] || '', placeholder, spellcheck: false, 'data-key': key, oninput: (e) => later(key, e.target.value) }, extra || {}));
+    const field = (label, ctl, extra) => h('div', { class: 'lb-f' }, h('div', { class: 'lb-fh' }, h('span', null, label), extra || null), ctl);
+    const mode = h('select', { title: 'With several patterns: entries matching any of them, or all of them', onchange: (e) => setFilter({ includeMode: e.target.value }) },
+      h('option', { value: 'any', selected: f.includeMode !== 'all' }, 'any of'), h('option', { value: 'all', selected: f.includeMode === 'all' }, 'all of'));
+    adv.innerHTML = '';
+    adv.append(
+      field('Lines matching', area('include', 'One pattern per line, text or regex'), mode),
+      field('Hide lines matching', area('exclude', 'HealthCheck\nactuator')),
+      h('div', { class: 'lb-f' },
+        field('Logger or thread', input('logger', 'e.g. PaymentClient or exec-3')),
+        field('Took at least (ms)', input('took', 'e.g. 1000', { inputmode: 'numeric' }))),
+      h('div', { class: 'lb-f' },
+        field('Trace IDs', area('trace', 'One ID per line')),
+        h('div', { class: 'lb-two' },
+          field('From', input('from', '10:15 or drag')),
+          field('To', input('to', '10:20')))),
+    );
+  }
+
+  function wireFilterRow() {
+    const bar = $('#filterbar');
+    const input = $('#qb-input');
+    const text = bar.querySelector('.lb-text');
+    const help = bar.querySelector('.qb-help');
+    const showHelp = (on) => {
+      if (on && !help.childElementCount) {
+        help.append(h('div', { class: 'qb-help-head' }, 'Type to filter as you go, or use these and press Enter. Each one becomes a chip.'));
+        for (const [ex, what] of QB_EXAMPLES) {
+          help.append(h('button', { class: 'qb-ex', onmousedown: (e) => { e.preventDefault(); input.value = (input.value ? input.value + ' ' : '') + ex.replace(/^> /, '>'); input.focus(); } }, h('code', null, ex), h('span', null, what)));
+        }
+      }
+      help.hidden = !on;
+    };
+    const live = debounce(() => {
+      if (!active || !isLogTab(active)) return;
+      const v = input.value;
+      if (isQueryLike(v)) return; // wait for Enter
+      if ((active.filter.text || '') !== v) setFilter({ text: v });
+    }, 160);
+    input.addEventListener('focus', () => { text.classList.add('focus'); showHelp(!input.value); });
+    input.addEventListener('blur', () => { text.classList.remove('focus'); showHelp(false); });
+    input.addEventListener('input', () => { showHelp(!input.value); live(); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const v = input.value;
+        if (isQueryLike(v)) {
+          if (active && active.filter.text) setFilter({ text: '' });
+          const bad = applyQuery(v);
+          input.value = bad.join(' '); // keep only what was not understood, so it can be corrected
+        } else if (active && (active.filter.text || '') !== v) setFilter({ text: v });
+        showHelp(false);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (input.value) { input.value = ''; if (active && active.filter.text) setFilter({ text: '' }); }
+        else { input.blur(); editor.focus(); }
+      } else if (e.key === 'Backspace' && !input.value && active && isLogTab(active)) {
+        const chips = filterChips(active.filter);
+        if (chips.length) { e.preventDefault(); setFilter(chips[chips.length - 1].clear); if (currentView === 'insights') renderInsights(); }
+      }
+    });
+    text.addEventListener('mousedown', (e) => { if (!e.target.closest('button') && e.target !== input) { e.preventDefault(); input.focus(); } });
+    for (const b of bar.querySelectorAll('.lb-tog')) {
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', () => { if (active) setFilter({ [b.dataset.tog]: !active.filter[b.dataset.tog] }); });
+    }
+    bar.querySelector('.qb-clear').onclick = () => { clearFilter(); };
+    bar.querySelector('.lb-more').onclick = () => { moreOpen = !moreOpen; renderFilterBar(); if (moreOpen) { const first = $('#logbar .lb-advanced textarea'); if (first) first.focus(); } };
+    bar.querySelector('.lb-auto').onclick = () => { extractState.preset = 'auto'; if (currentView === 'extract') renderExtract(); runAutoTables(); };
+    bar.querySelector('.lb-prev').onclick = () => jumpError(-1);
+    bar.querySelector('.lb-next').onclick = () => jumpError(1);
+  }
+  // Ctrl+K: the filter box for logs; the editor's find box for other files.
+  function focusQueryBar() {
+    if (active && isLogTab(active) && !$('#logbar').hidden) { const i = $('#qb-input'); i.focus(); i.select(); return; }
+    editor.focus();
+    editor.trigger('tf', 'actions.find');
+  }
   // Typed text -> filter changes. Returns the parts it could not understand.
   function applyQuery(text) {
     const q = text.trim();
@@ -2181,41 +2349,6 @@
     ['trace:c3e09f1a', 'one request across the log'], ['after:10:15 before:10:17', 'a time range'], ['took>1000', 'calls that took 1 s or more'],
     ['-healthcheck', 'hide entries with a word'], ['re:timed? ?out', 'a regular expression'], ['> split', 'run a command'],
   ];
-  function wireQueryBar() {
-    const bar = $('#filterbar');
-    const input = $('#qb-input');
-    const help = bar.querySelector('.qb-help');
-    const showHelp = (on) => {
-      if (on && !help.childElementCount) {
-        help.append(h('div', { class: 'qb-help-head' }, 'Type a filter and press Enter. Each part becomes a chip.'));
-        for (const [ex, what] of QB_EXAMPLES) {
-          help.append(h('button', { class: 'qb-ex', onmousedown: (e) => { e.preventDefault(); input.value = (input.value ? input.value + ' ' : '') + ex.replace(/^> /, '>'); input.focus(); } }, h('code', null, ex), h('span', null, what)));
-        }
-      }
-      help.hidden = !on || !(active && isLogTab(active));
-    };
-    input.addEventListener('focus', () => { bar.classList.add('focus'); showHelp(!input.value); });
-    input.addEventListener('blur', () => { bar.classList.remove('focus'); showHelp(false); });
-    input.addEventListener('input', () => showHelp(!input.value));
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const bad = applyQuery(input.value);
-        input.value = bad.join(' '); // keep only what was not understood, so it can be corrected
-        showHelp(false);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        if (input.value) input.value = ''; else { input.blur(); editor.focus(); }
-      } else if (e.key === 'Backspace' && !input.value && active && isLogTab(active)) {
-        const chips = filterChips(active.filter);
-        if (chips.length) { e.preventDefault(); setFilter(chips[chips.length - 1].clear); if (currentView === 'insights') renderInsights(); }
-      }
-    });
-    bar.addEventListener('mousedown', (e) => { if (!e.target.closest('button') && e.target !== input) { e.preventDefault(); input.focus(); } });
-    bar.querySelector('.qb-clear').onclick = () => { clearFilter(); input.focus(); };
-  }
-  function focusQueryBar() { const i = $('#qb-input'); i.focus(); i.select(); }
-
   // ---------- decorations ----------
   function refreshDecorations(tab) {
     if (!tab || !tabs.includes(tab)) return;
@@ -2259,105 +2392,79 @@
     tab.decoVersion = tab.model.getVersionId();
   }
 
-  // ---------- signal strip ----------
-  // "4 errors" / "3 warnings": one click shows only that level, a second click shows everything again.
-  function levelPill(level, n, word, cls) {
-    const f = active.filter;
-    const on = f.levels.size === 1 && f.levels.has(level);
-    const stop = (e) => e.stopPropagation();
-    return h('button', {
-      class: 'sig-pill ' + cls + (on ? ' on' : ''), 'aria-pressed': on ? 'true' : 'false',
-      title: on ? 'Show all levels again' : 'Show only ' + word + 's',
-      onpointerdown: stop, ondblclick: stop,
-      onclick: (e) => { stop(e); setFilter({ levels: on ? new Set(Logs.LEVEL_CHIPS) : new Set([level]) }); if (currentView === 'insights') renderInsights(); },
-    }, n + ' ' + word + (n === 1 ? '' : 's'));
+  // ---------- timeline strip (0.18.1, after tracepad) ----------
+  // One bar per time slice: all entries in grey, warnings and errors on top. Bars the filter hides are dimmed,
+  // the chosen time range is outlined. Click a bar to jump there, drag to filter by time, double-click to clear.
+  const TL_HINT = 'Click a bar to jump there · drag to filter by time';
+  const TL_HINT_RANGE = 'Showing the selected time range · double-click to clear';
+  function timelineHint(text) {
+    const el = $('#logbar .lb-hint');
+    if (!el) return;
+    const f = active && active.filter;
+    el.textContent = text || (f && (f.from || f.to) ? TL_HINT_RANGE : TL_HINT);
+    el.classList.toggle('live', !!text);
   }
   function renderSignal() {
+    const tlBox = $('#logbar .lb-timeline');
     const box = $('#signal');
     const an = active && isLogTab(active) ? active.an : null;
-    if (!settings.signal || !an) { box.hidden = true; return; }
-    box.hidden = false;
-    const meta = box.querySelector('.signal-meta');
-    const tl = an.timeline;
-    meta.innerHTML = '';
-    meta.append(
-      h('span', null, an.formatLabel || 'Log'),
-      h('span', null, an.entries.length.toLocaleString() + ' entries'),
-      levelPill('ERROR', an.counts.ERROR, 'error', 'e'),
-      levelPill('WARN', an.counts.WARN, 'warning', 'w'),
-      h('span', { class: 'grow' }),
-      tl ? h('span', null, Logs.formatTs(tl.min, true) + '  to  ' + Logs.formatTs(tl.max) + '   (' + Logs.formatDuration(tl.max - tl.min) + ', bars of ' + Logs.formatDuration(tl.size) + ')') : h('span', null, 'No timestamps found'));
-    const svg = $('#signal-svg');
-    svg.innerHTML = '';
-    renderSignalRange(tl);
-    if (!tl) return;
-    const n = tl.buckets.length;
-    const max = Math.max(1, ...tl.buckets.map((b) => b.total));
-    svg.setAttribute('viewBox', `0 0 ${n} 100`);
-    const pal = palette();
-    const acc = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
-    const y = (v) => 100 - (v / max) * 92;
-    let d = `M0 100`;
-    tl.buckets.forEach((b, i) => { d += ` L${i} ${y(b.total)} L${i + 1} ${y(b.total)}`; });
-    d += ` L${n} 100 Z`;
-    const ns = 'http://www.w3.org/2000/svg';
-    const path = document.createElementNS(ns, 'path');
-    path.setAttribute('d', d);
-    path.setAttribute('fill', acc + '30');
-    path.setAttribute('stroke', acc);
-    path.setAttribute('stroke-width', '1.2');
-    path.setAttribute('vector-effect', 'non-scaling-stroke');
-    svg.appendChild(path);
-    tl.buckets.forEach((b, i) => {
-      const bar = (count, color, offset) => {
-        if (!count) return;
-        const r = document.createElementNS(ns, 'rect');
-        const hgt = Math.max(8, (count / max) * 92);
-        r.setAttribute('x', i + 0.18);
-        r.setAttribute('width', 0.64);
-        r.setAttribute('y', 100 - hgt - offset);
-        r.setAttribute('height', hgt);
-        r.setAttribute('fill', color);
-        svg.appendChild(r);
-        return hgt;
-      };
-      const eh = bar(b.error, pal.err, 0) || 0;
-      bar(b.warn, pal.warn, eh);
-    });
-    if (an.vis && active.filter) {
-      // dim time ranges that the filter hides entirely
-      const visTl = Logs.timeline(an.entries, 90, an.vis);
-      if (visTl) {
-        tl.buckets.forEach((b, i) => {
-          const inVis = visTl.buckets.some((vb) => vb.total && vb.start < b.start + tl.size && vb.start + visTl.size > b.start);
-          if (inVis) return;
-          const r = document.createElementNS(ns, 'rect');
-          r.setAttribute('x', i); r.setAttribute('width', 1); r.setAttribute('y', 0); r.setAttribute('height', 100);
-          r.setAttribute('fill', getComputedStyle(document.documentElement).getPropertyValue('--editor').trim() + 'b0');
-          svg.appendChild(r);
-        });
-      }
+    const tl = an ? an.timeline : null;
+    tlBox.hidden = !settings.signal || !an;
+    if (tlBox.hidden) return;
+    const start = tlBox.querySelector('.lb-start'), end = tlBox.querySelector('.lb-end');
+    let bars = box.querySelector('.lb-bars');
+    if (!bars) { bars = h('div', { class: 'lb-bars' }); box.prepend(bars); }
+    bars.innerHTML = '';
+    box.hidden = !tl;
+    if (!tl) {
+      start.textContent = 'No timestamps found in this log';
+      end.textContent = '';
+      $('#logbar .lb-hint').textContent = '';
+      renderSignalRange(null);
+      return;
     }
+    start.textContent = Logs.formatTs(tl.min, true);
+    end.textContent = Logs.formatTs(tl.max, true) + '  ·  ' + Logs.formatDuration(tl.max - tl.min);
+    end.title = 'Each bar is ' + Logs.formatDuration(tl.size);
+    timelineHint();
+    // entries the filter shows, per bar
+    let vis = null;
+    if (an.vis) {
+      vis = new Uint32Array(tl.buckets.length);
+      an.entries.forEach((e, i) => { if (an.vis[i] && e.ts != null) { const k = Math.floor((e.ts - tl.base) / tl.size); if (k >= 0 && k < vis.length) vis[k]++; } });
+    }
+    const max = Math.max(1, ...tl.buckets.map((b) => b.total));
+    const pct = (v) => (v ? 'max(2px, ' + (Math.sqrt(v / max) * 100).toFixed(1) + '%)' : '0');
+    const frag = document.createDocumentFragment();
+    tl.buckets.forEach((b, i) => {
+      const bar = h('div', { class: 'lb-bar' + (vis && !vis[i] ? ' dim' : '') });
+      bar.append(h('i', { class: 'all', style: 'height:' + pct(b.total) }));
+      if (b.warn + b.error) bar.append(h('i', { class: 'warn', style: 'height:' + pct(b.warn + b.error) }));
+      if (b.error) bar.append(h('i', { class: 'error', style: 'height:' + pct(b.error) }));
+      frag.append(bar);
+    });
+    bars.append(frag);
+    renderSignalRange(tl);
   }
 
-  // The time range from the filter, shaded on the strip (everything outside it is dimmed).
+  // The time range from the filter, outlined on the strip.
   function renderSignalRange(tl) {
     const box = $('#signal');
     let shade = box.querySelector('.range');
-    if (!shade) { shade = h('div', { class: 'range', hidden: true }, h('i', { class: 'l' }), h('i', { class: 'r' })); box.append(shade); }
+    if (!shade) { shade = h('div', { class: 'range', hidden: true }); box.append(shade); }
     const f = active && active.filter;
     if (!tl || !f || (!f.from && !f.to)) { shade.hidden = true; return; }
     const an = active.an;
     const ref = an.entries.find((e) => e.ts != null);
     const start = tl.buckets[0].start, span = tl.buckets.length * tl.size;
-    let a = f.from ? Logs.parseTimeInput(f.from, ref ? ref.ts : null) : start;
+    const a = f.from ? Logs.parseTimeInput(f.from, ref ? ref.ts : null) : start;
     let b = f.to ? Logs.parseTimeInput(f.to, ref ? ref.ts : null) : start + span;
     if (f.to && /^\d{1,2}:\d{2}$/.test(f.to.trim())) b += 59999;
     if (a == null || b == null) { shade.hidden = true; return; }
     const pa = Math.max(0, Math.min(1, (a - start) / span)), pb = Math.max(0, Math.min(1, (b - start) / span));
     shade.hidden = false;
-    shade.querySelector('.l').style.width = (pa * 100) + '%';
-    shade.querySelector('.r').style.width = ((1 - pb) * 100) + '%';
+    shade.style.left = (pa * 100) + '%';
+    shade.style.width = (Math.max(0, pb - pa) * 100) + '%';
   }
 
   function signalBucketAt(clientX) {
@@ -2371,20 +2478,29 @@
 
   function wireSignal() {
     const box = $('#signal');
-    const cursor = h('div', { class: 'cursor', hidden: true });
-    const tip = h('div', { class: 'tip', hidden: true });
-    box.append(cursor, tip);
+    let hoverEl = null;
+    const setHover = (i) => {
+      const el = i == null ? null : box.querySelectorAll('.lb-bar')[i] || null;
+      if (el === hoverEl) return;
+      if (hoverEl) hoverEl.classList.remove('hover');
+      hoverEl = el;
+      if (el) el.classList.add('hover');
+    };
+    const describe = (r) => {
+      const an = active.an;
+      let shown = null;
+      if (an.vis) { shown = 0; for (let i = r.b.first; i >= 0 && i < an.entries.length && an.entries[i].ts != null && an.entries[i].ts < r.b.start + r.tl.size; i++) if (an.vis[i]) shown++; }
+      return Logs.formatTs(r.b.start) + ' – ' + Logs.formatTs(r.b.start + r.tl.size) + '  ·  ' + r.b.total + ' entr' + (r.b.total === 1 ? 'y' : 'ies') +
+        (shown != null ? ' (' + shown + ' shown)' : '') + (r.b.error ? ', ' + r.b.error + ' error' + (r.b.error === 1 ? '' : 's') : '') + (r.b.warn ? ', ' + r.b.warn + ' warning' + (r.b.warn === 1 ? '' : 's') : '');
+    };
     box.addEventListener('mousemove', (e) => {
+      if (drag && drag.moved) return;
       const r = signalBucketAt(e.clientX);
       if (!r) return;
-      cursor.hidden = tip.hidden = false;
-      cursor.style.left = r.x + 'px';
-      const flip = r.x > box.clientWidth - 260;
-      tip.style.left = r.x + 'px';
-      tip.style.transform = flip ? 'translateX(calc(-100% - 8px))' : 'translateX(8px)';
-      tip.textContent = Logs.formatTs(r.b.start) + '  ' + r.b.total + ' entries' + (r.b.error ? ', ' + r.b.error + ' errors' : '') + (r.b.warn ? ', ' + r.b.warn + ' warnings' : '');
+      setHover(r.i);
+      timelineHint(describe(r));
     });
-    box.addEventListener('mouseleave', () => { cursor.hidden = tip.hidden = true; });
+    box.addEventListener('mouseleave', () => { if (drag && drag.moved) return; setHover(null); timelineHint(); });
     // Drag across the strip to show only that time range; double-click clears it.
     const band = h('div', { class: 'drag', hidden: true });
     box.append(band);
@@ -2396,17 +2512,14 @@
     box.addEventListener('pointermove', (e) => {
       if (!drag) return;
       if (!drag.moved && Math.abs(e.clientX - drag.x0) < 5) return;
-      if (!drag.moved) { drag.moved = true; box.setPointerCapture(drag.id); box.classList.add('dragging'); }
+      if (!drag.moved) { drag.moved = true; box.setPointerCapture(drag.id); box.classList.add('dragging'); setHover(null); }
       const rect = box.getBoundingClientRect();
       const a = Math.max(rect.left, Math.min(drag.x0, e.clientX)), b = Math.min(rect.right, Math.max(drag.x0, e.clientX));
       band.hidden = false;
       band.style.left = (a - rect.left) + 'px';
       band.style.width = (b - a) + 'px';
       const ra = signalBucketAt(a), rb = signalBucketAt(b - 1);
-      if (ra && rb) {
-        tip.hidden = false;
-        tip.textContent = Logs.formatTs(ra.b.start) + '  to  ' + Logs.formatTs(rb.b.start + rb.tl.size);
-      }
+      if (ra && rb) timelineHint(Logs.formatTs(ra.b.start) + '  to  ' + Logs.formatTs(rb.b.start + rb.tl.size) + '  ·  release to filter');
     });
     const endDrag = (e) => {
       if (!drag) return;
@@ -2415,24 +2528,26 @@
       box.classList.remove('dragging');
       band.hidden = true;
       if (!d.moved) return;
-      d.consumed = true;
       suppressClick = true;
       const rect = box.getBoundingClientRect();
       const a = Math.max(rect.left, Math.min(d.x0, e.clientX)), b = Math.min(rect.right, Math.max(d.x0, e.clientX));
       const ra = signalBucketAt(a), rb = signalBucketAt(b - 1);
-      if (!ra || !rb) return;
+      if (!ra || !rb) { timelineHint(); return; }
       const from = ra.b.start;
       const to = Math.ceil((rb.b.start + rb.tl.size) / 1000) * 1000 - 1;
-      setFilter({ from: Logs.formatTs(Math.floor(from / 1000) * 1000, true), to: Logs.formatTs(to, true) });
-      toast('Showing ' + Logs.formatTs(from) + ' to ' + Logs.formatTs(to + 1) + '. Double-click the strip to show all times again.', 3500);
+      // one-day logs get short times (10:15:35); logs that span days keep the date
+      const tl = ra.tl;
+      const oneDay = Logs.formatTs(tl.min, true).slice(0, 10) === Logs.formatTs(tl.max, true).slice(0, 10);
+      setFilter({ from: Logs.formatTs(Math.floor(from / 1000) * 1000, !oneDay), to: Logs.formatTs(to, !oneDay) });
+      timelineHint();
     };
     let suppressClick = false;
     box.addEventListener('pointerup', endDrag);
-    box.addEventListener('pointercancel', () => { drag = null; band.hidden = true; box.classList.remove('dragging'); });
+    box.addEventListener('pointercancel', () => { drag = null; band.hidden = true; box.classList.remove('dragging'); timelineHint(); });
     box.addEventListener('dblclick', () => {
       if (!active || !active.filter || (!active.filter.from && !active.filter.to)) return;
       setFilter({ from: '', to: '' });
-      toast('Showing all times.', 1800);
+      timelineHint();
     });
     box.addEventListener('click', (e) => {
       if (suppressClick) { suppressClick = false; return; }
@@ -2440,10 +2555,14 @@
       if (!r || r.b.first < 0) return;
       const an = active.an;
       let idx = r.b.first;
-      // prefer the first error in that bucket, then first visible entry
+      // prefer the first error in that bucket, then the first visible entry
+      let firstVis = -1;
       for (let i = r.b.first; i < an.entries.length && an.entries[i].ts != null && an.entries[i].ts < r.b.start + r.tl.size; i++) {
-        if (an.entries[i].level === 'ERROR' && (!an.vis || an.vis[i])) { idx = i; break; }
+        if (an.vis && !an.vis[i]) continue;
+        if (firstVis < 0) firstVis = i;
+        if (an.entries[i].level === 'ERROR') { idx = i; firstVis = -2; break; }
       }
+      if (firstVis >= 0) idx = firstVis;
       revealEntry(idx);
     });
   }
@@ -2453,7 +2572,8 @@
     if (!an || !an.entries[idx]) return;
     if (an.vis && !an.vis[idx]) { toast('That entry is hidden by the filter. Clear the filter to see it.'); }
     const ln = an.entries[idx].start + 1;
-    editor.setSelection(new monaco.Range(ln, 1, ln, an.lines[ln - 1].length + 1));
+    // the whole line is selected with the cursor at its start, so the time and level stay in view (not the end of a long line)
+    editor.setSelection(new monaco.Selection(ln, an.lines[ln - 1].length + 1, ln, 1));
     editor.revealLineInCenter(ln);
     editor.focus();
   }
@@ -3006,12 +3126,27 @@
     if (!res.rows.length) { body.innerHTML = '<div class="msg">No matches. Check the pattern, or turn off "Only entries shown by the current filter".</div>'; return; }
     const state = { res, sortCol: -1, asc: true };
     const columns = ['line'].concat(res.columns);
-    const asRows = () => [res.columns].concat(state.rows.map((r) => r.values));
+    // What Copy and Open as new tab produce: the Line column plus every value column, in the order shown.
+    // A pattern without variable parts has no value columns, so the whole entry line becomes the "text" column.
+    const srcTab = active;
+    const lineText = (ln) => { try { return srcTab && srcTab.model && !srcTab.model.isDisposed() ? srcTab.model.getLineContent(ln) : ''; } catch { return ''; } };
+    const asRows = () => {
+      const noCols = !res.columns.length;
+      const head = ['Line'].concat(noCols ? ['text'] : res.columns);
+      return [head].concat(state.rows.map((r) => [String(r.line)].concat(noCols ? [lineText(r.line)] : r.values)));
+    };
     state.rows = res.rows.slice();
     const tools = (label, fn, title) => { const b = h('button', { onclick: fn, title }, label); $('#panel-tools').append(b); };
-    tools('Copy as table', async () => { await api.clipboardWrite({ text: Tables.formatRows(asRows(), 'tsv'), html: Tables.rowsToHtml(asRows()) }); toast('Copied. Paste into Excel, Word or Outlook to get a real table.'); }, 'Copies a real table for Excel / Word / Outlook');
-    tools('Copy CSV', async () => { await api.clipboardWrite({ text: Tables.formatRows(asRows(), 'csv') }); toast('Copied as CSV'); });
-    tools('Open as new tab', () => { const t = newTab({ name: 'extract.csv', content: Tables.formatRows(asRows(), 'csv'), lang: 'plaintext' }); t.detectDone = true; activate(t); });
+    const copied = (ok, what) => toast(ok ? what : 'Could not copy: the browser blocked the clipboard. Click the page and try again.');
+    tools('Copy as table', async () => { const rows = asRows(); copied(await api.clipboardWrite({ text: Tables.formatRows(rows, 'tsv'), html: Tables.rowsToHtml(rows) }), 'Copied ' + (rows.length - 1).toLocaleString() + ' rows. Paste into Excel, Word or Outlook to get a real table.'); }, 'Copies a real table for Excel / Word / Outlook');
+    tools('Copy CSV', async () => { const rows = asRows(); copied(await api.clipboardWrite({ text: Tables.formatRows(rows, 'csv') }), 'Copied ' + (rows.length - 1).toLocaleString() + ' rows as CSV'); });
+    tools('Open as new tab', () => {
+      const base = ((srcTab && srcTab.name) || 'extract').replace(/\.[^.]+$/, '') + '-table';
+      const t = newTab({ name: base + '.csv', content: Tables.formatRows(asRows(), 'csv'), lang: 'plaintext' });
+      t.detectDone = true;
+      activate(t);
+      toast('Opened ' + state.rows.length.toLocaleString() + ' rows in a new tab. Save it as .csv to open it in Excel.');
+    }, 'Opens every row as CSV in a new tab');
     if (!opts.keepLast && res.columns.length) {
       const colSel = h('select', { title: 'Column to count' }, res.columns.map((c, i) => h('option', { value: String(i) }, c)));
       $('#panel-tools').append(colSel);
@@ -3061,7 +3196,7 @@
   function gotoLine(ln) {
     editor.setPosition({ lineNumber: ln, column: 1 });
     editor.revealLineInCenter(ln);
-    editor.setSelection(new monaco.Range(ln, 1, ln, active.model.getLineMaxColumn(ln)));
+    editor.setSelection(new monaco.Selection(ln, active.model.getLineMaxColumn(ln), ln, 1)); // cursor at the start: the line's start stays in view
     editor.focus();
   }
 
@@ -3145,7 +3280,7 @@
         check('wrap', 'Word wrap (Alt+Z)'),
         check('whitespace', 'Show whitespace'),
         check('minimap', 'Minimap'),
-        check('signal', 'Signal strip above logs', renderSignal)),
+        check('signal', 'Timeline above logs', renderSignal)),
       h('div', { class: 'group' }, h('h3', null, 'Pasting tables'),
         h('div', { class: 'field' }, h('label', null, 'Tables from Excel or web pages are pasted as'),
           h('select', { onchange: (e) => set('pasteFormat', e.target.value) },
@@ -4508,8 +4643,10 @@
     renderGrid();
     const fmt = h('select', null, Tables.FORMATS.map((f) => h('option', { value: f, selected: f === settings.pasteFormat }, f === 'aligned' ? 'aligned columns' : f)));
     $('#panel-tools').append(fmt);
-    panelButton('Copy as table', async () => { const r = readGrid(); await api.clipboardWrite({ text: Tables.formatRows(r, 'tsv'), html: Tables.rowsToHtml(r) }); toast('Copied. Paste into Word, Outlook or Excel to get a real table.'); });
-    panelButton('Copy as text', async () => { await api.clipboardWrite({ text: Tables.formatRows(readGrid(), fmt.value) }); toast('Copied as ' + fmt.value); });
+    const copied = (ok, what) => toast(ok ? what : 'Could not copy: the browser blocked the clipboard. Click the page and try again.');
+    panelButton('Copy as table', async () => { const r = readGrid(); copied(await api.clipboardWrite({ text: Tables.formatRows(r, 'tsv'), html: Tables.rowsToHtml(r) }), 'Copied. Paste into Word, Outlook or Excel to get a real table.'); });
+    panelButton('Copy as text', async () => { copied(await api.clipboardWrite({ text: Tables.formatRows(readGrid(), fmt.value) }), 'Copied as ' + fmt.value); });
+    panelButton('Open as new tab', () => { const t = newTab({ name: 'table.md', content: Tables.formatRows(readGrid(), 'markdown'), lang: 'markdown' }); t.detectDone = true; activate(t); }, 'Opens the table as Markdown in a new tab');
     panelButton('Write back to editor', () => {
       const text = Tables.formatRows(readGrid(), fmt.value);
       editor.pushUndoStop();
@@ -4933,7 +5070,7 @@
     $('#panel-close').onclick = closePanel;
     wireSideResize();
     wireSignal();
-    wireQueryBar();
+    wireFilterRow();
     wireSnapDrag();
     wireLayoutButton();
     wirePanelResize();
@@ -4944,7 +5081,7 @@
     wireWelcome();
     setupTitleBar();
     editor.onDidChangeModelContent(() => updateWelcome());
-    window.addEventListener('resize', debounce(renderSignal, 150));
+    window.addEventListener('resize', debounce(() => { renderSignal(); renderFilterBar(); }, 150));
 
     watchKeyboardPaste();
     editor.onDidChangeCursorPosition(updateStatus);

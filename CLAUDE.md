@@ -1,7 +1,7 @@
 # TextForge: project context for Claude Code
 
 This file is the hand-off for continuing work on TextForge. Read it fully before changing anything.
-Current version: **0.18.0** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
+Current version: **0.18.1** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
 
 **Direction (agreed 2026-11-07):** move to Tauri 2 + a Rust log engine (also WASM on the web) + Svelte/TypeScript,
 one phase per release; 0.13.0 added the Tauri preview. The UI follows design "D · Focus with tools" from the
@@ -117,7 +117,13 @@ command palette (~3628) · misc actions, keyboard shortcuts, init (~3745–end).
 - **Themes:** CSS custom properties on `:root`, set by `applyTheme()`. Contrast is computed:
   `bestOn()` for text on the accent, and `readableAccent()` for `--accent-text`, kept at or above
   4.5:1.
-- **Query bar (0.14.0):** `#filterbar` is now the query bar in the title bar (id kept for tests). Chips come from
+- **Log bar (0.18.1, after the owner's tracepad app https://sudeepasundi.github.io/tracepad/):** `#logbar` under the tab row
+  holds the timeline strip (`#signal`: div bars in `.lb-bars`, sqrt heights, `.dim` when the filter hides a bar, `.range`
+  outline, hover readout in `.lb-hint`) and the filter row `#filterbar` (level chips `.lb-lvl`, the text box `#qb-input` with
+  Aa / .* toggles = `filter.text/textCase/textRegex`, applied live after `Logs.filterEntries` in `computeVisibility()`,
+  More filters `.lb-advanced`, count, Clear filters, Auto tables, error arrows). Text that looks like query syntax
+  (`isQueryLike`) waits for Enter and goes through `applyQuery()`. The title bar no longer has a filter box. Levels are
+  shown by the chips, not as a query chip. Chips come from
   `filterChips(tab.filter)`, each with the patch that removes it; typed text goes through `applyQuery()`. New filter
   syntax needs both: a branch in `applyQuery()` and a chip in `filterChips()`. `filter.took` (ms) is applied after
   `Logs.filterEntries` in `computeVisibility()`, like `filter.lines`.
@@ -174,7 +180,7 @@ node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
 node test/files.e2e.js         # 19  Open files list
 node test/fullscreen.e2e.js    # 38  resize and full screen everywhere, including appearance checks
 node test/incident.e2e.js      # 45  incident view: lanes, findings, time window, reader, jump to a line, requests, pins and report, phone
-node test/querybar.e2e.js      # 39  design D: query bar, time chip, count filters, result tabs, patterns, selection toolbar, badge
+node test/querybar.e2e.js      # 60  log bar (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge
 xvfb-run -a node test/ui-desktop.e2e.js   # 9  Electron: title bar, Copilot resize, full-screen window restore
 ```
 

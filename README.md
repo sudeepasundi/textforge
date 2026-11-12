@@ -19,8 +19,10 @@ logs automatically.
   calls. Drag a time window to read every log's entries in order; click one to jump to that line. Switch to
   Requests to follow one trace ID across services as a waterfall, with a plain-language summary of what broke.
   Pin findings and requests, add notes, and copy the incident report for Teams or Outlook (secrets masked).
-- **One query bar (Ctrl+K).** Type `level:warn+ logger:Payment took>1000 after:10:15 -healthcheck` and each
-  part becomes a chip; drag on the timeline for a time-range chip. Start with `>` to run a command.
+- **Timeline and filters in one bar.** Click a timeline bar to jump there, drag across bars to filter by time.
+  Level chips with counts, a filter box that filters as you type (match case, regex), and More filters for
+  logger, trace IDs, duration and time. Ctrl+K, then `level:warn+ logger:Payment took>1000 -healthcheck` and
+  Enter adds chips; start with `>` to run a command.
 - **Auto tables.** TextForge learns the message patterns in a log and builds one table per pattern. Whatever
   changes between lines (IDs, users, durations, status words, key=value values, JSON fields) becomes a named
   column, and number columns get min / avg / p95 / max. Copy the result as a real table for Excel or Outlook,

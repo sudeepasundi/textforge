@@ -29,11 +29,11 @@ const ok = (name, pass, detail) => results.push({ name, pass: !!pass, detail });
     tabs: __tf.tabs.map((t) => t.name).filter((n) => /-service\.log|gateway/.test(n)),
     lanes: [...document.querySelectorAll('#incident .inc-svc')].map((x) => x.textContent),
     dots: document.querySelectorAll('#incident .inc-dot').length, err: document.querySelectorAll('#incident .inc-dot.err').length,
-    signalHidden: getComputedStyle(document.getElementById('signal')).display === 'none',
+    signalHidden: getComputedStyle(document.getElementById('logbar')).display === 'none',
   }));
   ok('The sample opens four service logs as tabs and lines them up as four lanes', r.tabs.length === 4 && r.lanes.join() === 'api-gateway,order-service,payment-service,inventory-service', JSON.stringify(r));
   ok('Lanes show entries as dots, errors in their own colour', r.dots > 40 && r.err >= 6, JSON.stringify(r));
-  ok('The single-log timeline steps aside while the incident is open', r.signalHidden, JSON.stringify(r));
+  ok('The single-log timeline and filters step aside while the incident is open', r.signalHidden, JSON.stringify(r));
 
   r = await page.evaluate(() => ({
     first: document.querySelector('#incident .inc-f.on .inc-f-title').textContent,
