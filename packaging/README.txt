@@ -376,3 +376,14 @@ FILTERS IN A DROP DOWN (0.19.0)
   fold it. While a filter is on, the button says how many ("Filters (2)") and the label
   row shows "4 of 20" with a small x to clear.
   Prefer the old way? The pin at the end of the filter row keeps it open above the log.
+
+PREVIEW IN ITS OWN WINDOW (0.20.0)
+  Like VS Code and IntelliJ, the preview can move into a window of its own, so you can
+  put it on another screen and keep the editor full width. Open the preview (Alt+P) and
+  click the window button next to "Copy as rich text", or press Alt+Shift+W, or use the
+  command palette: "Preview in a new window".
+  The window belongs to that tab: it follows what you type, keeps the theme, and has
+  "Copy as rich text". The status bar says "Preview window" (click it to bring the window
+  to the front). "Back to the editor" closes the window and shows the preview beside the
+  editor again; closing the tab closes its window.
+  On the web, allow pop-ups for the site if the browser blocks the window.

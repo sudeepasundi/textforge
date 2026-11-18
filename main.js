@@ -113,7 +113,24 @@ function createWindow() {
   win.loadFile('index.html');
 
   win.webContents.on('will-navigate', (e) => e.preventDefault());
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // The preview can open in its own window (0.20.0): only blank windows named tf-preview-*, which the page draws into.
+  win.webContents.setWindowOpenHandler(({ url, frameName }) => {
+    if ((url === 'about:blank' || url === '') && /^tf-preview-\d+$/.test(frameName || '')) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          autoHideMenuBar: true, backgroundColor: '#0f1420', icon: path.join(__dirname, 'assets', 'icon.ico'),
+          webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+        },
+      };
+    }
+    return { action: 'deny' };
+  });
+  win.webContents.on('did-create-window', (child) => {
+    child.setMenu(null);
+    child.webContents.on('will-navigate', (e) => e.preventDefault());
+    child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  });
 
   win.on('close', () => {
     try {

@@ -148,6 +148,7 @@
     };
     for (const k in vars) document.documentElement.style.setProperty('--' + k, vars[k]);
     document.documentElement.style.colorScheme = t.dark ? 'dark' : 'light';
+    if (typeof tabs !== 'undefined') for (const tb of tabs) if (tb.popWin && !tb.popWin.closed) { try { copyStylesTo(tb.popWin); } catch { /* ignore */ } }
     applyDensity();
     if (api.setTitleBar) api.setTitleBar({ color: t.surface, symbolColor: t.muted, height: barHeight() });
     if (!window.monaco) return;
@@ -354,6 +355,7 @@
     if (!tab.detectDone && tab.model.getLanguageId() === 'plaintext') maybeDetectLog(tab);
     scheduleAnalysis(tab);
     if (tab === active && tab.preview) schedulePreview();
+    if (tab.popWin && tab.popRender) tab.popRender();
   };
 
   const maybeDetectLog = debounce((tab) => {
@@ -587,6 +589,7 @@
       if (choice === 'save' && !(await saveTab(tab))) return false;
     }
     if (tab.tailing) api.tailStop(tab.path);
+    closePops(tab);
     const idx = tabs.indexOf(tab);
     removeSplitTab(tab);
     tabs.splice(idx, 1);
@@ -742,7 +745,8 @@
     if (an) $('#st-log').textContent = (an.formatLabel || 'Log') + '  ' + an.counts.ERROR + ' errors  ' + an.counts.WARN + ' warnings';
     $('#st-follow').hidden = !(active.path && isLogTab(active));
     updateHiddenChip();
-    $('#st-preview').hidden = !(active.model.getLanguageId() === 'markdown' || active.preview);
+    $('#st-preview').hidden = !(active.model.getLanguageId() === 'markdown' || active.preview || (active.popWin && !active.popWin.closed));
+    updatePopButtons();
     $('#st-follow').classList.toggle('on', !!active.tailing);
     $('#st-follow').textContent = active.tailing ? 'Following' : 'Follow';
   }
@@ -1037,10 +1041,12 @@
 
   const renderPreview = () => {
     if (!active || !active.preview) return;
-    const scroller = $('#preview-body');
-    const body = $('#preview-doc');
+    renderPreviewInto(active, $('#preview-body'), $('#preview-doc'), $('#pv-name'));
+  };
+  function renderPreviewInto(tab, scroller, body, nameEl) {
+    const active = tab; // the code below was written for the active tab
     const keep = scroller.scrollTop;
-    $('#pv-name').textContent = active.name;
+    nameEl.textContent = active.name;
     body.innerHTML = '';
     if (active.model.getValueLength() > 3000000) {
       body.append(h('p', { class: 'hint' }, 'This tab is too large to preview.'));
@@ -1057,8 +1063,104 @@
     body.querySelectorAll('table.md-table').forEach(decorateTable);
     if (!body.childNodes.length) body.append(h('p', { class: 'hint' }, 'Nothing to preview yet. Paste a chat or type Markdown.'));
     scroller.scrollTop = keep;
-  };
+  }
   const schedulePreview = debounce(renderPreview, 180);
+
+  // ---------- preview in its own window (0.20.0), like VS Code / IntelliJ ----------
+  // The preview of one tab moves into a separate window you can put on another screen. It follows that tab as you
+  // type, keeps the theme in step, has Copy as rich text, and "Back to the editor" docks it again. Closing the tab
+  // closes its window. The window is a same-origin popup that this page draws into, so nothing is loaded from outside.
+  function copyStylesTo(w) {
+    const d = w.document;
+    d.documentElement.setAttribute('style', document.documentElement.getAttribute('style') || '');
+    d.documentElement.style.colorScheme = document.documentElement.style.colorScheme;
+    d.body.className = 'pv-window' + (document.body.classList.contains('compact') ? ' compact' : '');
+    if (d.getElementById('tf-pop-css')) return;
+    let css = '';
+    for (const sheet of Array.from(document.styleSheets)) {
+      if (sheet.href && /\/vs\//.test(sheet.href)) continue; // Monaco's own styles are not needed
+      try { css += Array.from(sheet.cssRules).map((r) => r.cssText).join('\n') + '\n'; }
+      catch { if (sheet.href) { const l = d.createElement('link'); l.rel = 'stylesheet'; l.href = sheet.href; d.head.append(l); } }
+    }
+    const st = d.createElement('style');
+    st.id = 'tf-pop-css';
+    st.textContent = css;
+    d.head.append(st);
+  }
+  function popOutPreview(tab = active) {
+    if (!tab) return;
+    if (tab.popWin && !tab.popWin.closed) { tab.popWin.focus(); return; }
+    const W = Math.min(1100, Math.round(screen.availWidth * 0.55)), H = Math.min(900, Math.round(screen.availHeight * 0.85));
+    let w = null;
+    try { w = window.open('', 'tf-preview-' + tab.id, 'popup=yes,width=' + W + ',height=' + H); } catch { w = null; }
+    if (!w) { toast('This browser blocked the preview window. Allow pop-ups for this site, or use full screen (Alt+Shift+P).', 6000); return; }
+    const d = w.document;
+    d.open();
+    d.write('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Preview</title></head><body></body></html>');
+    d.close();
+    copyStylesTo(w);
+    const name = d.createElement('span');
+    name.id = 'pv-name';
+    const scroller = d.createElement('div');
+    scroller.id = 'preview-body';
+    const doc = d.createElement('div');
+    doc.id = 'preview-doc';
+    doc.className = 'md';
+    scroller.append(doc);
+    const btn = (label, title, fn) => { const b = d.createElement('button'); b.textContent = label; b.title = title; b.onclick = fn; return b; };
+    const head = d.createElement('div');
+    head.className = 'pv-head';
+    const strong = d.createElement('strong');
+    strong.textContent = 'Preview';
+    const grow = d.createElement('span');
+    grow.className = 'grow';
+    head.append(strong, name, grow,
+      btn('Copy as rich text', 'Copies the formatted document. Paste into Teams, Outlook or Word to keep tables and formatting.', async () => {
+        const ok = await api.clipboardWrite({ text: tab.model.getValue(), html: richHtml(doc) });
+        name.textContent = ok === false ? tab.name + '  ·  copying was blocked' : tab.name + '  ·  copied with formatting';
+        setTimeout(() => { name.textContent = tab.name; }, 2500);
+      }),
+      btn('Back to the editor', 'Close this window and show the preview beside the editor again', () => { dockPreview(tab); }));
+    const box = d.createElement('div');
+    box.id = 'preview';
+    box.className = 'pv-pop';
+    box.append(head, scroller);
+    d.body.append(box);
+    tab.popWin = w;
+    tab.popRender = debounce(() => renderPop(tab), 180);
+    w.addEventListener('pagehide', () => { if (tab.popWin === w) { tab.popWin = null; updatePopButtons(); } });
+    w.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'w') { e.preventDefault(); w.close(); } });
+    renderPop(tab);
+    // the side preview of that tab moves into the window
+    if (tab.preview) { tab.preview = false; if (tab === active) applyPreview(); }
+    updatePopButtons();
+    try { w.focus(); } catch { /* ignore */ }
+  }
+  function renderPop(tab) {
+    const w = tab.popWin;
+    if (!w || w.closed || !tabs.includes(tab)) return;
+    const d = w.document;
+    d.title = 'Preview · ' + tab.name + ' · TextForge';
+    renderPreviewInto(tab, d.getElementById('preview-body'), d.getElementById('preview-doc'), d.getElementById('pv-name'));
+  }
+  function dockPreview(tab) {
+    const w = tab.popWin;
+    tab.popWin = null;
+    try { if (w && !w.closed) w.close(); } catch { /* ignore */ }
+    if (tabs.includes(tab)) { activate(tab); tab.preview = true; applyPreview(); }
+    updatePopButtons();
+    window.focus();
+  }
+  function closePops(tab) {
+    for (const t of tab ? [tab] : tabs) { const w = t.popWin; t.popWin = null; try { if (w && !w.closed) w.close(); } catch { /* ignore */ } }
+  }
+  function updatePopButtons() {
+    const b = $('#pv-pop');
+    if (b) b.hidden = !active;
+    const st = $('#st-preview');
+    if (st && active && active.popWin && !active.popWin.closed) { st.hidden = false; st.classList.add('on'); st.textContent = 'Preview window'; st.title = 'The preview of this tab is in its own window. Click to bring it to the front.'; }
+    else if (st) { st.textContent = 'Preview'; st.title = 'Show the formatted preview (Alt+P)'; }
+  }
 
   // Drag the preview's left edge to make it wider or narrower (20%-85% of the editor area).
   function wirePreviewResize() {
@@ -1157,7 +1259,9 @@
   function wirePreview() {
     $('#pv-close').onclick = () => setPreview(false);
     $('#pv-copy').onclick = copyRichText;
-    $('#st-preview').onclick = () => setPreview(!(active && active.preview));
+    $('#pv-pop').onclick = () => popOutPreview(active);
+    window.addEventListener('pagehide', () => closePops());
+    $('#st-preview').onclick = () => { if (active && active.popWin && !active.popWin.closed) { active.popWin.focus(); return; } setPreview(!(active && active.preview)); };
     $('#st-hidden').onclick = () => { settings.showHidden = !settings.showHidden; refreshHidden(); };
     $('#preview-body').addEventListener('click', (e) => {
       if (e.target.closest('button, a, th') || !window.getSelection().isCollapsed) return;
@@ -5080,6 +5184,7 @@
       ['Table view of selection', 'Tables', 'Ctrl+Shift+T', openTableView],
       ['Convert selection to table', 'Tables', '', convertToTable],
       ['Toggle preview (rendered Markdown and tables)', 'View', 'Alt+P', () => setPreview(!(active && active.preview))],
+      ['Preview in a new window', 'View', 'Alt+Shift+W', () => popOutPreview(active)],
       ['Copy as rich text (for Teams / Outlook)', 'Edit', '', copyRichText],
       ['Select all', 'Edit', 'Ctrl+A', selectAll],
       ['Pretty-print JSON', 'Edit', '', prettyJson],
@@ -5274,6 +5379,7 @@
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyT') openTableView();
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyD') { e.preventDefault(); pickCompare(); }
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyM') { e.preventDefault(); toggleFocusMode(); }
+    else if (e.altKey && !ctrl && e.shiftKey && e.code === 'KeyW') { e.preventDefault(); popOutPreview(active); }
     else if (e.key === 'Escape' && document.body.classList.contains('focus-mode') && !$('.menu') && !document.fullscreenElement) toggleFocusMode(false);
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyI') { if (incident && !$('#incident')) reopenIncident(); else pickIncident(); }
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyP') setPreview(!(active && active.preview));
@@ -5443,7 +5549,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { setFiltersOpen, likePattern, addHideRule, removeText, hiddenRanges: () => (active ? hiddenRanges(active).length : 0), refreshHidden, zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { popOutPreview, dockPreview, setFiltersOpen, likePattern, addHideRule, removeText, hiddenRanges: () => (active ? hiddenRanges(active).length : 0), refreshHidden, zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
