@@ -28,7 +28,9 @@ jobs:
         shell: pwsh
         run: |
           $app = "dist/TextForge-win32-x64/resources/app"
-          Get-ChildItem "$app/node_modules" | Where-Object { $_.Name -ne 'monaco-editor' } | Remove-Item -Recurse -Force
+          Get-ChildItem "$app/node_modules" | Where-Object { $_.Name -notin @('monaco-editor', 'mermaid') } | Remove-Item -Recurse -Force
+          Get-ChildItem "$app/node_modules/mermaid" | Where-Object { $_.Name -notin @('dist', 'package.json', 'LICENSE') } | Remove-Item -Recurse -Force
+          Get-ChildItem "$app/node_modules/mermaid/dist" | Where-Object { $_.Name -ne 'mermaid.min.js' } | Remove-Item -Recurse -Force
           Copy-Item packaging/README.txt dist/TextForge-win32-x64/README.txt
           Copy-Item LICENSE dist/TextForge-win32-x64/LICENSE.txt
           $v = (Get-Content package.json | ConvertFrom-Json).version

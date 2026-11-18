@@ -1225,3 +1225,25 @@ body.pv-window #pv-name { color: var(--muted); margin-left: 6px; overflow: hidde
 body.pv-window #preview-body { padding: 32px clamp(20px, 4vw, 72px) 80px; background: var(--editor); }
 body.pv-window #preview-doc.md { max-width: 1440px; margin: 0 auto; font-size: 15px; line-height: 1.65; }
 body.pv-window .md-table-tools button + button { display: none; } /* Edit as table works on the main window, not here */
+
+/* ---- Markdown layout switcher: Editor only / Editor and Preview / Preview only (0.21.0) ---- */
+#md-modes { position: absolute; top: 5px; right: 20px; z-index: 5; display: flex; gap: 1px; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--line); box-shadow: 0 2px 8px rgb(0 0 0 / .18); }
+#md-modes[hidden] { display: none; }
+#md-modes button { width: 26px; height: 24px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+#md-modes button:hover { background: var(--raised); color: var(--fg); }
+#md-modes button.on { background: var(--accent-soft); color: var(--accent-text); }
+#md-modes svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#work.has-md-modes.with-preview .pv-head { padding-right: 112px; }
+#work.preview-only #editors { display: none; }
+#work.preview-only #preview { flex-basis: 100% !important; border-left: none; }
+#work.preview-only #pv-resize { display: none; }
+
+/* ---- Mermaid diagrams in the preview (0.21.0) ---- */
+.md .md-mermaid { margin: 1em 0; padding: 12px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--editor); text-align: center; }
+.md .md-mermaid svg { max-width: 100%; height: auto; }
+.md .md-mermaid.pending { opacity: .55; min-height: 40px; color: var(--muted); font-size: 12px; }
+.md .md-mermaid.error { text-align: left; border-color: color-mix(in srgb, var(--err) 55%, var(--line)); }
+.md .md-mermaid .mmd-err { color: var(--err); font: 12px/1.5 var(--mono); white-space: pre-wrap; margin-bottom: 8px; }
+.md .md-mermaid.error pre { margin: 0; }
+/* the app-wide icon rule (svg { width: 18px; fill: none; stroke: currentColor }) must not touch Mermaid drawings, also while Mermaid measures them */
+svg[id^="tf-mmd-"] { width: 100%; height: auto; fill: initial; stroke: none; stroke-width: 1; stroke-linecap: butt; stroke-linejoin: miter; flex: initial; }

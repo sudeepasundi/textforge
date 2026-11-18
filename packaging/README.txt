@@ -387,3 +387,20 @@ PREVIEW IN ITS OWN WINDOW (0.20.0)
   to the front). "Back to the editor" closes the window and shows the preview beside the
   editor again; closing the tab closes its window.
   On the web, allow pop-ups for the site if the browser blocks the window.
+
+MARKDOWN LAYOUT BUTTONS, LIKE INTELLIJ (0.21.0)
+  A Markdown tab has three small buttons in the top-right corner of the editor:
+  Editor only, Editor and Preview, and Preview only. Preview only hides the editor and
+  gives the formatted document the whole width. Each tab keeps its own choice.
+  Alt+Shift+O switches between Preview only and Editor and Preview; Alt+P still turns the
+  preview on and off. The palette has "Markdown: Editor only / Editor and Preview /
+  Preview only". The preview window from 0.20.0 is still there (Alt+Shift+W).
+
+MERMAID DIAGRAMS IN THE PREVIEW (0.21.0)
+  A ```mermaid block in Markdown is drawn as a diagram in the preview, the preview
+  window and Preview only: flowcharts, sequence diagrams, class, state and ER diagrams,
+  Gantt charts and the rest. Diagrams follow the light or dark theme and redraw as you type.
+  A mistake shows Mermaid's message and the block's source instead of the diagram.
+  "Copy as rich text" pastes each diagram as a picture, so it shows up in Teams, Outlook
+  and Word. Mermaid ships with the app (desktop and website) and loads only when a
+  document has a diagram; the claude.ai copy loads it from jsDelivr, like the editor.

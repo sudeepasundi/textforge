@@ -12,6 +12,8 @@ const ROOT = __dirname;
 const OUT = path.join(ROOT, 'web-dist');
 const MONACO_SRC = path.join(ROOT, 'node_modules/monaco-editor/min/vs');
 const MONACO_VERSION = require('monaco-editor/package.json').version;
+const MERMAID_JS = path.join(ROOT, 'node_modules/mermaid/dist/mermaid.min.js');
+const MERMAID_VERSION = require('mermaid/package.json').version;
 const APP_VERSION = require('./package.json').version;
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 
@@ -53,6 +55,8 @@ fs.mkdirSync(SH, { recursive: true });
 copyDir(MONACO_SRC, path.join(SH, 'monaco/vs'), (p) => /\.map$/.test(p));
 copyDir(path.join(ROOT, 'fonts'), path.join(SH, 'fonts'));
 copyDir(path.join(ROOT, 'samples'), path.join(SH, 'samples'));
+fs.mkdirSync(path.join(SH, 'vendor'), { recursive: true });
+fs.copyFileSync(MERMAID_JS, path.join(SH, 'vendor/mermaid.min.js'));
 fs.writeFileSync(path.join(SH, 'style.css'), css);
 for (const s of scripts) fs.copyFileSync(path.join(ROOT, s), path.join(SH, s));
 fs.writeFileSync(path.join(SH, 'icon.svg'), ICON_SVG);
@@ -92,7 +96,7 @@ const shHtml = `<!DOCTYPE html>
 </head>
 <body>
 ${bodyMarkup}
-  <script>window.TF_WEB = { target: 'selfhost', version: '${APP_VERSION}', monacoBase: 'monaco', canDownload: true, sample: ${JSON.stringify(sample)}, samples: ${samplesJs} };</script>
+  <script>window.TF_WEB = { target: 'selfhost', version: '${APP_VERSION}', monacoBase: 'monaco', mermaidSrc: 'vendor/mermaid.min.js', canDownload: true, sample: ${JSON.stringify(sample)}, samples: ${samplesJs} };</script>
   <script src="monaco/vs/loader.js"></script>
 ${scripts.map((s) => `  <script src="${s}"></script>`).join('\n')}
   <script>
@@ -138,7 +142,7 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== location.origin) return;
   const keep = (res) => { if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); } return res; };
-  if (url.pathname.includes('/monaco/') || url.pathname.includes('/fonts/')) {
+  if (url.pathname.includes('/monaco/') || url.pathname.includes('/fonts/') || url.pathname.includes('/vendor/')) {
     e.respondWith(caches.match(req, { ignoreSearch: true }).then((hit) => hit || fetch(req).then(keep)));
     return;
   }
@@ -185,6 +189,8 @@ const DK = path.join(OUT, 'desktop');
 fs.mkdirSync(DK, { recursive: true });
 copyDir(MONACO_SRC, path.join(DK, 'monaco/vs'), (p) => /\.map$/.test(p));
 copyDir(path.join(ROOT, 'fonts'), path.join(DK, 'fonts'));
+fs.mkdirSync(path.join(DK, 'vendor'), { recursive: true });
+fs.copyFileSync(MERMAID_JS, path.join(DK, 'vendor/mermaid.min.js'));
 fs.writeFileSync(path.join(DK, 'style.css'), css);
 const desktopScripts = ['tables.js', 'markdown.js', 'logs.js', 'tauri-api.js', 'renderer.js'];
 for (const s of desktopScripts) fs.copyFileSync(path.join(ROOT, s), path.join(DK, s));
@@ -199,7 +205,7 @@ fs.writeFileSync(path.join(DK, 'index.html'), `<!DOCTYPE html>
 </head>
 <body>
 ${bodyMarkup}
-  <script>window.TF_WEB = { target: 'tauri', version: '${APP_VERSION}', monacoBase: 'monaco', samples: ${samplesJs} };</script>
+  <script>window.TF_WEB = { target: 'tauri', version: '${APP_VERSION}', monacoBase: 'monaco', mermaidSrc: 'vendor/mermaid.min.js', samples: ${samplesJs} };</script>
   <script src="monaco/vs/loader.js"></script>
 ${desktopScripts.map((s) => `  <script src="${s}"></script>`).join('\n')}
 </body>
@@ -224,7 +230,7 @@ ${monacoCss}
 ${pageCss}
 </style>
 ${bodyMarkup}
-<script>window.TF_WEB = { target: 'artifact', version: '${APP_VERSION}', monacoBase: '${cdn}', inlineMonacoCss: true, canDownload: false, sample: ${JSON.stringify(sample).replace(/<\//g, '<\\/')}, samples: ${samplesJs} };</script>
+<script>window.TF_WEB = { target: 'artifact', version: '${APP_VERSION}', monacoBase: '${cdn}', mermaidSrc: 'https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js', inlineMonacoCss: true, canDownload: false, sample: ${JSON.stringify(sample).replace(/<\//g, '<\\/')}, samples: ${samplesJs} };</script>
 <script src="${cdn}/vs/loader.js"></script>
 ${scripts.map((s) => `<script>\n${inline(s)}\n</script>`).join('\n')}
 `;

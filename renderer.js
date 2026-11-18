@@ -148,7 +148,9 @@
     };
     for (const k in vars) document.documentElement.style.setProperty('--' + k, vars[k]);
     document.documentElement.style.colorScheme = t.dark ? 'dark' : 'light';
-    if (typeof tabs !== 'undefined') for (const tb of tabs) if (tb.popWin && !tb.popWin.closed) { try { copyStylesTo(tb.popWin); } catch { /* ignore */ } }
+    if (typeof tabs !== 'undefined') for (const tb of tabs) if (tb.popWin && !tb.popWin.closed) { try { copyStylesTo(tb.popWin); if (tb.popRender) tb.popRender(); } catch { /* ignore */ } }
+    // Mermaid diagrams are drawn in the theme's palette: redraw them
+    if (typeof active !== 'undefined' && active && active.preview && document.querySelector('#preview-doc .md-mermaid')) setTimeout(() => renderPreview(), 0);
     applyDensity();
     if (api.setTitleBar) api.setTitleBar({ color: t.surface, symbolColor: t.muted, height: barHeight() });
     if (!window.monaco) return;
@@ -747,6 +749,7 @@
     updateHiddenChip();
     $('#st-preview').hidden = !(active.model.getLanguageId() === 'markdown' || active.preview || (active.popWin && !active.popWin.closed));
     updatePopButtons();
+    updateMdModes();
     $('#st-follow').classList.toggle('on', !!active.tailing);
     $('#st-follow').textContent = active.tailing ? 'Following' : 'Follow';
   }
@@ -1023,18 +1026,41 @@
   function setPreview(on, { full } = {}) {
     if (!active) return;
     active.preview = on;
+    if (!on) active.pvOnly = false;
     applyPreview();
     if (on && full) enterFullscreen($('#preview'), { label: 'The preview' });
     else if (on) toast('Preview on. Drag its left edge to resize, or press Alt+Shift+P for full screen. Copy as rich text pastes into Teams or Outlook with tables intact.', 5000);
   }
 
+  // Editor only / Editor and Preview / Preview only, like IntelliJ's Markdown editor (0.21.0).
+  const mdMode = (tab = active) => !tab || !tab.preview ? 'editor' : tab.pvOnly ? 'preview' : 'split';
+  function setMdMode(mode, tab = active) {
+    if (!tab) return;
+    if (mode !== 'editor' && tab.popWin && !tab.popWin.closed) closePops(tab);
+    tab.preview = mode !== 'editor';
+    tab.pvOnly = mode === 'preview';
+    if (tab === active) { applyPreview(); updateStatus(); }
+    if (mode === 'editor' && tab === active && editor) editor.focus();
+  }
+  function updateMdModes() {
+    const box = $('#md-modes');
+    if (!box) return;
+    const show = !!active && (active.model.getLanguageId() === 'markdown' || !!active.preview);
+    box.hidden = !show;
+    $('#work').classList.toggle('has-md-modes', show);
+    const m = mdMode();
+    box.querySelectorAll('button').forEach((b) => { const on = b.dataset.mode === m; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+  }
+
   function applyPreview() {
     const on = !!(active && active.preview);
+    $('#work').classList.toggle('preview-only', on && !!active.pvOnly);
     if (!on && isFullscreen($('#preview'))) exitFullscreen();
     $('#preview').hidden = !on;
     $('#preview').style.flexBasis = (settings.previewW || 50) + '%';
     $('#work').classList.toggle('with-preview', on);
     $('#st-preview').classList.toggle('on', on);
+    updateMdModes();
     if (on) renderPreview();
     setTimeout(() => editor && editor.layout(), 0);
   }
@@ -1061,10 +1087,140 @@
       body.append(h('p', { class: 'hint', style: 'margin-top:0' }, 'This tab is ' + (active.model.getLanguageId() === 'log' ? 'a log' : 'not Markdown') + ', so the preview shows it as written. Paste a chat or Markdown to see formatted tables.'), pre);
     }
     body.querySelectorAll('table.md-table').forEach(decorateTable);
+    drawMermaid(body);
     if (!body.childNodes.length) body.append(h('p', { class: 'hint' }, 'Nothing to preview yet. Paste a chat or type Markdown.'));
     scroller.scrollTop = keep;
   }
   const schedulePreview = debounce(renderPreview, 180);
+
+  // ---------- Mermaid diagrams in the preview (0.21.0) ----------
+  // ```mermaid blocks are drawn as diagrams. Mermaid is a large script, so it is loaded only when a document has a
+  // diagram: from the app's own files (desktop, self-hosted web) or, in the single-file build, from jsDelivr like Monaco.
+  // Rendering is serialised and cached by theme + source, so re-rendering the preview while typing elsewhere is instant;
+  // a diagram being edited keeps its last good drawing (dimmed) until the new one is ready.
+  const mermaidSrc = WEB.mermaidSrc || 'node_modules/mermaid/dist/mermaid.min.js';
+  const mermaidCache = new Map();
+  let mermaidLoad = null, mermaidTheme = null, mermaidSeq = 0, mermaidQueue = Promise.resolve();
+  function loadMermaid() {
+    if (window.mermaid) return Promise.resolve(window.mermaid);
+    if (!mermaidLoad) {
+      mermaidLoad = new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = mermaidSrc;
+        s.onload = () => (window.mermaid ? res(window.mermaid) : rej(new Error('Mermaid did not load.')));
+        s.onerror = () => { mermaidLoad = null; rej(new Error('Could not load Mermaid' + (navigator.onLine === false ? ' (offline).' : '.'))); };
+        document.head.append(s);
+      });
+    }
+    return mermaidLoad;
+  }
+  const mermaidThemeName = () => ((THEMES[settings.theme] || THEMES.slate).dark ? 'dark' : 'default');
+  function mermaidSvg(src) {
+    const theme = mermaidThemeName();
+    const key = theme + '\n' + src;
+    if (mermaidCache.has(key)) return Promise.resolve(mermaidCache.get(key));
+    const run = async () => {
+      if (mermaidCache.has(key)) return mermaidCache.get(key);
+      const m = await loadMermaid();
+      if (mermaidTheme !== theme) {
+        // no HTML labels: plain SVG text can be turned into a picture for "Copy as rich text"
+        m.initialize({ startOnLoad: false, securityLevel: 'strict', theme, htmlLabels: false, flowchart: { htmlLabels: false, wrappingWidth: 320 }, fontFamily: 'Segoe UI, Inter, Arial, sans-serif' });
+        mermaidTheme = theme;
+      }
+      const id = 'tf-mmd-' + (++mermaidSeq);
+      let out;
+      try { out = { svg: (await m.render(id, src)).svg }; } catch (e) { out = { error: String((e && e.message) || e).split('\n').slice(0, 4).join('\n') }; }
+      document.querySelectorAll('#' + id + ', #d' + id).forEach((x) => x.remove()); // left behind after an error
+      if (mermaidCache.size > 80) mermaidCache.delete(mermaidCache.keys().next().value);
+      mermaidCache.set(key, out);
+      return out;
+    };
+    const p = mermaidQueue.then(run, run);
+    mermaidQueue = p.catch(() => {});
+    return p;
+  }
+  function drawMermaid(body) {
+    const blocks = [...body.querySelectorAll('pre[data-lang]')].filter((p) => /^mermaid$/i.test(p.getAttribute('data-lang')));
+    const last = body.__mmdLast || (body.__mmdLast = []);
+    blocks.forEach((pre, i) => {
+      const src = pre.textContent;
+      const box = body.ownerDocument.createElement('div');
+      box.className = 'md-mermaid';
+      box.setAttribute('data-src', src);
+      if (pre.hasAttribute('data-line')) box.setAttribute('data-line', pre.getAttribute('data-line'));
+      pre.replaceWith(box);
+      const put = (r) => {
+        if (!box.isConnected && box.ownerDocument === document) return;
+        box.classList.remove('pending');
+        if (r.svg) { box.innerHTML = r.svg; box.classList.remove('error'); last[i] = r.svg; return; }
+        box.classList.add('error');
+        box.textContent = '';
+        const msg = body.ownerDocument.createElement('div'); msg.className = 'mmd-err'; msg.textContent = 'Mermaid: ' + r.error;
+        box.append(msg, pre);
+      };
+      const hit = mermaidCache.get(mermaidThemeName() + '\n' + src);
+      if (hit) { put(hit); return; }
+      box.classList.add('pending');
+      if (last[i]) box.innerHTML = last[i]; else box.textContent = 'Drawing the diagram…';
+      mermaidSvg(src).then(put, (e) => put({ error: e.message }));
+    });
+    last.length = blocks.length;
+  }
+  // A drawn diagram as a PNG data URL, for pasting into Teams / Outlook / Word (they don't take inline SVG).
+  function svgToPng(svg) {
+    return new Promise((res) => {
+      try {
+        const box = svg.getBoundingClientRect();
+        const vb = svg.viewBox && svg.viewBox.baseVal;
+        const w = Math.max(1, Math.round(box.width || (vb && vb.width) || 600)), hgt = Math.max(1, Math.round(box.height || (vb && vb.height) || 400));
+        const c = svg.cloneNode(true);
+        c.setAttribute('xmlns', 'http://www.w3.org/2000/svg'); c.setAttribute('width', w); c.setAttribute('height', hgt); c.style.maxWidth = 'none';
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const cv = document.createElement('canvas'); cv.width = w * 2; cv.height = hgt * 2;
+            const g = cv.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, cv.width, cv.height); g.scale(2, 2); g.drawImage(img, 0, 0, w, hgt);
+            res({ src: cv.toDataURL('image/png'), w, h: hgt });
+          } catch { res(null); }
+        };
+        img.onerror = () => res(null);
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(c));
+      } catch { res(null); }
+    });
+  }
+  // Rich HTML with every diagram as a picture, drawn in the light theme so it reads on a white e-mail.
+  async function richHtmlWithDiagrams(el) {
+    const boxes = [...el.querySelectorAll('.md-mermaid')];
+    if (!boxes.length) return richHtml(el);
+    const pics = [];
+    for (const b of boxes) {
+      const pre = b.querySelector('pre');
+      const src = pre ? pre.textContent : null;
+      let svgEl = b.querySelector('svg');
+      if (mermaidThemeName() !== 'default' || !svgEl) {
+        // draw a light copy off screen
+        const tmp = document.createElement('div'); tmp.style.cssText = 'position:fixed;left:-10000px;top:0;width:1200px';
+        document.body.append(tmp);
+        try {
+          const code = src || b.getAttribute('data-src');
+          const m = await loadMermaid();
+          m.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default', htmlLabels: false, flowchart: { htmlLabels: false, wrappingWidth: 320 }, fontFamily: 'Segoe UI, Inter, Arial, sans-serif' });
+          mermaidTheme = 'default';
+          const s = code || b.getAttribute('data-src');
+          if (s) { tmp.innerHTML = (await m.render('tf-mmd-' + (++mermaidSeq), s)).svg; svgEl = tmp.querySelector('svg'); }
+        } catch { svgEl = null; }
+        pics.push(svgEl ? await svgToPng(svgEl) : null);
+        tmp.remove();
+      } else pics.push(await svgToPng(svgEl));
+    }
+    const clone = el.cloneNode(true);
+    [...clone.querySelectorAll('.md-mermaid')].forEach((b, i) => {
+      const p = pics[i];
+      if (p) { const img = document.createElement('img'); img.src = p.src; img.width = p.w; img.height = p.h; img.alt = 'Diagram'; b.replaceWith(img); }
+      else { const pre = document.createElement('pre'); pre.textContent = boxes[i].getAttribute('data-src') || ''; b.replaceWith(pre); }
+    });
+    return richHtml(clone);
+  }
 
   // ---------- preview in its own window (0.20.0), like VS Code / IntelliJ ----------
   // The preview of one tab moves into a separate window you can put on another screen. It follows that tab as you
@@ -1116,7 +1272,7 @@
     grow.className = 'grow';
     head.append(strong, name, grow,
       btn('Copy as rich text', 'Copies the formatted document. Paste into Teams, Outlook or Word to keep tables and formatting.', async () => {
-        const ok = await api.clipboardWrite({ text: tab.model.getValue(), html: richHtml(doc) });
+        const ok = await api.clipboardWrite({ text: tab.model.getValue(), html: await richHtmlWithDiagrams(doc) });
         name.textContent = ok === false ? tab.name + '  ·  copying was blocked' : tab.name + '  ·  copied with formatting';
         setTimeout(() => { name.textContent = tab.name; }, 2500);
       }),
@@ -1233,11 +1389,12 @@
   }
 
   // Rich HTML for Teams / Outlook / Word: the preview with inline styles, without our buttons.
-  function previewRichHtml() { return richHtml($('#preview-doc')); }
+  function previewRichHtml() { return richHtmlWithDiagrams($('#preview-doc')); }
   // A rendered Markdown element as HTML that keeps its look when pasted into Teams, Outlook or Word.
   function richHtml(el) {
     const clone = el.cloneNode(true);
     clone.querySelectorAll('.md-table-tools, input').forEach((x) => x.remove());
+    clone.querySelectorAll('[data-src]').forEach((x) => x.removeAttribute('data-src'));
     clone.querySelectorAll('[data-line]').forEach((x) => x.removeAttribute('data-line'));
     clone.querySelectorAll('table').forEach((t) => { t.removeAttribute('class'); t.setAttribute('border', '1'); t.setAttribute('cellspacing', '0'); t.setAttribute('cellpadding', '4'); t.style.cssText = 'border-collapse:collapse;font-family:Calibri,Segoe UI,Arial,sans-serif;font-size:11pt'; });
     clone.querySelectorAll('th').forEach((x) => { x.removeAttribute('class'); x.removeAttribute('title'); x.style.cssText += ';border:1px solid #999;padding:4px 8px;background:#f2f2f2;text-align:' + (x.style.textAlign || 'left'); });
@@ -1252,7 +1409,7 @@
     if (!active) return;
     if (!active.preview) { active.preview = true; applyPreview(); }
     renderPreview();
-    const ok = await api.clipboardWrite({ text: active.model.getValue(), html: previewRichHtml() });
+    const ok = await api.clipboardWrite({ text: active.model.getValue(), html: await previewRichHtml() });
     toast(ok === false ? 'Copying was blocked by the browser.' : 'Copied with formatting. Paste into Teams, Outlook or Word.', 4500);
   }
 
@@ -1260,6 +1417,7 @@
     $('#pv-close').onclick = () => setPreview(false);
     $('#pv-copy').onclick = copyRichText;
     $('#pv-pop').onclick = () => popOutPreview(active);
+    $('#md-modes').addEventListener('click', (e) => { const b = e.target.closest('button[data-mode]'); if (b) setMdMode(b.dataset.mode); });
     window.addEventListener('pagehide', () => closePops());
     $('#st-preview').onclick = () => { if (active && active.popWin && !active.popWin.closed) { active.popWin.focus(); return; } setPreview(!(active && active.preview)); };
     $('#st-hidden').onclick = () => { settings.showHidden = !settings.showHidden; refreshHidden(); };
@@ -5184,6 +5342,9 @@
       ['Table view of selection', 'Tables', 'Ctrl+Shift+T', openTableView],
       ['Convert selection to table', 'Tables', '', convertToTable],
       ['Toggle preview (rendered Markdown and tables)', 'View', 'Alt+P', () => setPreview(!(active && active.preview))],
+      ['Markdown: Editor only', 'View', '', () => setMdMode('editor')],
+      ['Markdown: Editor and Preview', 'View', '', () => setMdMode('split')],
+      ['Markdown: Preview only', 'View', 'Alt+Shift+O', () => setMdMode('preview')],
       ['Preview in a new window', 'View', 'Alt+Shift+W', () => popOutPreview(active)],
       ['Copy as rich text (for Teams / Outlook)', 'Edit', '', copyRichText],
       ['Select all', 'Edit', 'Ctrl+A', selectAll],
@@ -5380,6 +5541,7 @@
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyD') { e.preventDefault(); pickCompare(); }
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyM') { e.preventDefault(); toggleFocusMode(); }
     else if (e.altKey && !ctrl && e.shiftKey && e.code === 'KeyW') { e.preventDefault(); popOutPreview(active); }
+    else if (e.altKey && !ctrl && e.shiftKey && e.code === 'KeyO') { e.preventDefault(); setMdMode(mdMode() === 'preview' ? 'split' : 'preview'); }
     else if (e.key === 'Escape' && document.body.classList.contains('focus-mode') && !$('.menu') && !document.fullscreenElement) toggleFocusMode(false);
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyI') { if (incident && !$('#incident')) reopenIncident(); else pickIncident(); }
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyP') setPreview(!(active && active.preview));
@@ -5549,7 +5711,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { popOutPreview, dockPreview, setFiltersOpen, likePattern, addHideRule, removeText, hiddenRanges: () => (active ? hiddenRanges(active).length : 0), refreshHidden, zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { popOutPreview, dockPreview, setMdMode, richHtml: (el) => richHtmlWithDiagrams(el), mdMode: () => mdMode(), setFiltersOpen, likePattern, addHideRule, removeText, hiddenRanges: () => (active ? hiddenRanges(active).length : 0), refreshHidden, zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });
