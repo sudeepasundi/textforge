@@ -232,6 +232,30 @@ const fills = (r, w) => r && r.x === 0 && r.y === 0 && r.w === w.w && r.h === w.
   ok('The help dialog says which version is running', /^TextForge \d+\.\d+\.\d+/.test(r), r);
   await page.keyboard.press('Escape');
 
+  // ---------- 0.20.0: the preview in its own window ----------
+  await page.evaluate(() => { const t = __tf.tabs.find((x) => x.name === 'notes.md'); __tf.activate(t); __tf.setPreview(true); });
+  await page.waitForTimeout(250);
+  const [pop] = await Promise.all([page.context().waitForEvent('page'), page.click('#pv-pop')]);
+  await pop.waitForTimeout(400);
+  r = await pop.evaluate(() => ({ title: document.title, table: !!document.querySelector('#preview-doc .md-table'), bg: getComputedStyle(document.body).backgroundColor, head: !!document.querySelector('.pv-head') }));
+  const mainBg = await page.evaluate(() => getComputedStyle(document.getElementById('preview-body')).backgroundColor);
+  ok('The pop-out button opens the preview in its own window, in the same theme', /Preview · notes\.md/.test(r.title) && r.table && r.head, JSON.stringify(Object.assign(r, { mainBg })));
+  r = await page.evaluate(() => ({ side: !document.getElementById('preview').hidden, chip: document.getElementById('st-preview').textContent }));
+  ok('The side preview moves into the window; the status bar says "Preview window"', !r.side && r.chip === 'Preview window', JSON.stringify(r));
+  await page.evaluate(() => { const m = __tf.active.model; m.applyEdits([{ range: new monaco.Range(m.getLineCount(), 1, m.getLineCount(), 1), text: '\n\n## Typed after popping out\n' }]); });
+  await pop.waitForTimeout(450);
+  r = await pop.evaluate(() => [...document.querySelectorAll('#preview-doc h2')].some((x) => x.textContent === 'Typed after popping out'));
+  ok('The window follows what you type', r, String(r));
+  await page.evaluate(() => __tf.setTheme('paper'));
+  await pop.waitForTimeout(200);
+  r = await pop.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  ok('Changing the theme changes the window too', r === 'rgb(255, 255, 255)', r);
+  await page.evaluate(() => __tf.setTheme('slate'));
+  await Promise.all([pop.waitForEvent('close'), pop.click('.pv-head button:has-text("Back to the editor")')]);
+  await page.waitForTimeout(250);
+  r = await page.evaluate(() => ({ side: !document.getElementById('preview').hidden, chip: document.getElementById('st-preview').textContent }));
+  ok('"Back to the editor" closes the window and shows the preview beside the editor again', r.side && r.chip === 'Preview', JSON.stringify(r));
+
   // ---------- phone ----------
   // the sidebar is a drawer over the editor on a phone: close it first, as a phone user would
   await page.evaluate(() => { if (!document.getElementById('side').hidden) document.getElementById('side-close').click(); });

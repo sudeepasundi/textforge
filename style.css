@@ -1215,3 +1215,13 @@ body.focus-mode #side, body.focus-mode #side-resize, body.focus-mode #logbar, bo
 #filterbar .lb-pin { flex: none; width: 30px; height: 28px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--muted); }
 #filterbar .lb-pin:hover { color: var(--fg); }
 #filterbar .lb-pin[aria-pressed="true"] { color: var(--accent-text); border-color: var(--accent-text); background: var(--accent-soft); }
+
+/* 0.20.0: the preview in its own window */
+body.pv-window { margin: 0; height: 100vh; overflow: hidden; background: var(--editor); color: var(--fg); font-family: var(--ui); font-size: 13px; }
+body.pv-window #preview.pv-pop { position: fixed; inset: 0; display: flex; flex-direction: column; border: none; flex-basis: auto; }
+body.pv-window .pv-head { padding: 8px 14px 8px 22px; background: var(--surface); }
+body.pv-window .pv-head button { padding: 3px 12px; font-size: 12px; }
+body.pv-window #pv-name { color: var(--muted); margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body.pv-window #preview-body { padding: 32px clamp(20px, 4vw, 72px) 80px; background: var(--editor); }
+body.pv-window #preview-doc.md { max-width: 1440px; margin: 0 auto; font-size: 15px; line-height: 1.65; }
+body.pv-window .md-table-tools button + button { display: none; } /* Edit as table works on the main window, not here */

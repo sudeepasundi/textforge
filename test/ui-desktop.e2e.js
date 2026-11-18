@@ -87,6 +87,25 @@ const appDir = path.join(__dirname, '..');
     const same = after.b.width === before.width && after.b.height === before.height && after.b.x === before.x && after.b.y === before.y;
     return ok(during && fill && !after.fs && same, `full screen: ${during}, preview fills: ${fill}, back to ${after.b.width}x${after.b.height} (was ${before.width}x${before.height})`);
   });
+  // 0.20.0: the preview in its own window
+  await check('The preview opens in its own window, follows typing, and "Back to the editor" docks it again', async () => {
+    await E(() => { const t = __tf.newTab({ name: 'pop.md', content: '# Pop out\n\n| a | b |\n|---|---|\n| 1 | 2 |\n' }); __tf.activate(t); __tf.setPreview(true); });
+    await win.waitForTimeout(300);
+    const [pop] = await Promise.all([app.waitForEvent('window', { timeout: 10000 }), E(() => document.getElementById('pv-pop').click())]);
+    await pop.waitForTimeout(500);
+    const a = await pop.evaluate(() => ({ title: document.title, h1: (document.querySelector('#preview-doc h1') || {}).textContent, rows: document.querySelectorAll('#preview-doc table tr').length }));
+    const n = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+    await E(() => { const m = __tf.active.model; m.applyEdits([{ range: new monaco.Range(m.getLineCount(), 1, m.getLineCount(), 1), text: '\n## Typed later\n' }]); });
+    await pop.waitForTimeout(500);
+    const live = await pop.evaluate(() => [...document.querySelectorAll('#preview-doc h2')].map((x) => x.textContent).join('|'));
+    const side = await E(() => !document.getElementById('preview').hidden);
+    await pop.evaluate(() => [...document.querySelectorAll('.pv-head button')].find((b) => /Back to the editor/.test(b.textContent)).click()).catch(() => {});
+    await win.waitForTimeout(500);
+    const after = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+    const sideAgain = await E(() => !document.getElementById('preview').hidden);
+    return ok(/Preview · pop\.md/.test(a.title) && a.h1 === 'Pop out' && a.rows === 2 && n === 2 && live === 'Typed later' && !side && after === 1 && sideAgain,
+      JSON.stringify({ a, windows: n, live, side, after, sideAgain }));
+  });
   await check('No errors in the app window', async () => ok(errors.length === 0, errors.join(' | ') || 'none'));
 
   let pass = 0;

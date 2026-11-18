@@ -43,6 +43,7 @@ logs automatically.
   a filter box and sorting. Click to open, drag to reorder or onto the editor to show side by side.
 - **Tabs:** double-click to rename (unsaved tabs too; saved files are renamed on disk), drag to reorder,
   and right-click for more options.
+- **Preview in its own window** (Alt+Shift+W), like VS Code and IntelliJ: put it on another screen; it follows your typing.
 - **Full screen** for the preview (Alt+Shift+P), the comparison, the results panel and Copilot; Esc exits.
   The preview can also be resized by dragging its edge.
 - **Resizable results panel:** drag its top edge, or maximise it.
