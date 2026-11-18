@@ -747,6 +747,7 @@
     updateHiddenChip();
     $('#st-preview').hidden = !(active.model.getLanguageId() === 'markdown' || active.preview || (active.popWin && !active.popWin.closed));
     updatePopButtons();
+    updateMdModes();
     $('#st-follow').classList.toggle('on', !!active.tailing);
     $('#st-follow').textContent = active.tailing ? 'Following' : 'Follow';
   }
@@ -1023,18 +1024,41 @@
   function setPreview(on, { full } = {}) {
     if (!active) return;
     active.preview = on;
+    if (!on) active.pvOnly = false;
     applyPreview();
     if (on && full) enterFullscreen($('#preview'), { label: 'The preview' });
     else if (on) toast('Preview on. Drag its left edge to resize, or press Alt+Shift+P for full screen. Copy as rich text pastes into Teams or Outlook with tables intact.', 5000);
   }
 
+  // Editor only / Editor and Preview / Preview only, like IntelliJ's Markdown editor (0.21.0).
+  const mdMode = (tab = active) => !tab || !tab.preview ? 'editor' : tab.pvOnly ? 'preview' : 'split';
+  function setMdMode(mode, tab = active) {
+    if (!tab) return;
+    if (mode !== 'editor' && tab.popWin && !tab.popWin.closed) closePops(tab);
+    tab.preview = mode !== 'editor';
+    tab.pvOnly = mode === 'preview';
+    if (tab === active) { applyPreview(); updateStatus(); }
+    if (mode === 'editor' && tab === active && editor) editor.focus();
+  }
+  function updateMdModes() {
+    const box = $('#md-modes');
+    if (!box) return;
+    const show = !!active && (active.model.getLanguageId() === 'markdown' || !!active.preview);
+    box.hidden = !show;
+    $('#work').classList.toggle('has-md-modes', show);
+    const m = mdMode();
+    box.querySelectorAll('button').forEach((b) => { const on = b.dataset.mode === m; b.classList.toggle('on', on); b.setAttribute('aria-checked', on); });
+  }
+
   function applyPreview() {
     const on = !!(active && active.preview);
+    $('#work').classList.toggle('preview-only', on && !!active.pvOnly);
     if (!on && isFullscreen($('#preview'))) exitFullscreen();
     $('#preview').hidden = !on;
     $('#preview').style.flexBasis = (settings.previewW || 50) + '%';
     $('#work').classList.toggle('with-preview', on);
     $('#st-preview').classList.toggle('on', on);
+    updateMdModes();
     if (on) renderPreview();
     setTimeout(() => editor && editor.layout(), 0);
   }
@@ -1260,6 +1284,7 @@
     $('#pv-close').onclick = () => setPreview(false);
     $('#pv-copy').onclick = copyRichText;
     $('#pv-pop').onclick = () => popOutPreview(active);
+    $('#md-modes').addEventListener('click', (e) => { const b = e.target.closest('button[data-mode]'); if (b) setMdMode(b.dataset.mode); });
     window.addEventListener('pagehide', () => closePops());
     $('#st-preview').onclick = () => { if (active && active.popWin && !active.popWin.closed) { active.popWin.focus(); return; } setPreview(!(active && active.preview)); };
     $('#st-hidden').onclick = () => { settings.showHidden = !settings.showHidden; refreshHidden(); };
@@ -5184,6 +5209,9 @@
       ['Table view of selection', 'Tables', 'Ctrl+Shift+T', openTableView],
       ['Convert selection to table', 'Tables', '', convertToTable],
       ['Toggle preview (rendered Markdown and tables)', 'View', 'Alt+P', () => setPreview(!(active && active.preview))],
+      ['Markdown: Editor only', 'View', '', () => setMdMode('editor')],
+      ['Markdown: Editor and Preview', 'View', '', () => setMdMode('split')],
+      ['Markdown: Preview only', 'View', 'Alt+Shift+O', () => setMdMode('preview')],
       ['Preview in a new window', 'View', 'Alt+Shift+W', () => popOutPreview(active)],
       ['Copy as rich text (for Teams / Outlook)', 'Edit', '', copyRichText],
       ['Select all', 'Edit', 'Ctrl+A', selectAll],
@@ -5380,6 +5408,7 @@
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyD') { e.preventDefault(); pickCompare(); }
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyM') { e.preventDefault(); toggleFocusMode(); }
     else if (e.altKey && !ctrl && e.shiftKey && e.code === 'KeyW') { e.preventDefault(); popOutPreview(active); }
+    else if (e.altKey && !ctrl && e.shiftKey && e.code === 'KeyO') { e.preventDefault(); setMdMode(mdMode() === 'preview' ? 'split' : 'preview'); }
     else if (e.key === 'Escape' && document.body.classList.contains('focus-mode') && !$('.menu') && !document.fullscreenElement) toggleFocusMode(false);
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyI') { if (incident && !$('#incident')) reopenIncident(); else pickIncident(); }
     else if (e.altKey && !ctrl && !e.shiftKey && e.code === 'KeyP') setPreview(!(active && active.preview));
@@ -5549,7 +5578,7 @@
     Object.defineProperty(window.__tf, 'autoState', { get: () => autoState });
     Object.defineProperty(window.__tf, 'panelTabs', { get: () => panelTabs.map((t) => ({ mode: t.mode, title: t.title, on: t === panelCur })) });
     Object.defineProperty(window.__tf, 'incident', { get: () => incident });
-    Object.assign(window.__tf, { popOutPreview, dockPreview, setFiltersOpen, likePattern, addHideRule, removeText, hiddenRanges: () => (active ? hiddenRanges(active).length : 0), refreshHidden, zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
+    Object.assign(window.__tf, { popOutPreview, dockPreview, setMdMode, mdMode: () => mdMode(), setFiltersOpen, likePattern, addHideRule, removeText, hiddenRanges: () => (active ? hiddenRanges(active).length : 0), refreshHidden, zoomTimeline, toggleFocusMode, strip: () => (active && active.an ? stripBuckets(active.an) : null), reportMarkdown: () => reportMarkdown(), pinFinding, followRequest, setIncidentMode, openIncident, openIncidentSample, closeIncident, reopenIncident, pickIncident, applyQuery, filterChips: () => (active ? filterChips(active.filter) : []), openSearch, showPanelTab: (mode) => showPanelTab(panelTabs.find((t) => t.mode === mode)), hideSide });
     Object.defineProperty(window.__tf, 'split', { get: () => split });
     Object.defineProperty(window.__tf, 'editor', { get: () => editor });
     Object.assign(window.__tf, { setTheme: (id, accent) => { settings.theme = id; if (accent) settings.accent = accent; applyTheme(); }, THEMES, ACCENTS, openSample, updateWelcome, openCopilot, closeCopilot, applyCopilotLayout, get settings() { return settings; }, enterFullscreen, exitFullscreen, isFullscreen: (sel) => isFullscreen(sel ? document.querySelector(sel) : null), openSplit: (t) => addSplitPane(t), addSplitPane, removePane, closeSplit, applyLayout, openLayoutPicker, LAYOUTS, swapSplit, topFullLine, renameTab, moveTab, extract: extractPreset, autoTables: () => runAutoTables(), showAutoTable, countBy: countByColumn, checkDiskChanges, compareWith, closeCompare, findDuplicates, copyShown });

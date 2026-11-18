@@ -1,7 +1,7 @@
 # TextForge: project context for Claude Code
 
 This file is the hand-off for continuing work on TextForge. Read it fully before changing anything.
-Current version: **0.20.0** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
+Current version: **0.21.0** (see `package.json`). Owner: NUKE (GitHub `sudeepasundi`).
 
 **Direction (agreed 2026-11-07):** move to Tauri 2 + a Rust log engine (also WASM on the web) + Svelte/TypeScript,
 one phase per release; 0.13.0 added the Tauri preview. The UI follows design "D · Focus with tools" from the
@@ -156,6 +156,9 @@ command palette (~3628) · misc actions, keyboard shortcuts, init (~3745–end).
   preview). `tab.popWin` / `tab.popRender` keep it live; `applyTheme()` re-syncs it; `closeTab()` closes it. Electron's
   `setWindowOpenHandler` allows only those blank `tf-preview-*` windows. Tauri is not verified yet (falls back to a toast
   if `window.open` returns null).
+- **Markdown layout (0.21.0):** `#md-modes` (top-right of `#work`) switches Editor only / Editor and Preview / Preview only, like IntelliJ.
+  State is per tab: `tab.preview` + `tab.pvOnly` (`mdMode()`, `setMdMode()`); `#work.preview-only` hides `#editors`. Shown for Markdown tabs
+  or whenever the preview is on; `updateMdModes()` runs from `applyPreview()` and `updateStatus()`. Alt+Shift+O toggles Preview only.
 - **Results tabs (0.14.0):** `openPanel(mode, title)` keeps one tab per `mode`; switching stashes the DOM nodes of
   `#panel-tools` / `#panel-body`, so code that fills the panel keeps using those ids as before.
 - **Commands:** add new features to the command palette list (`commands()` in the COMMAND PALETTE
@@ -195,7 +198,7 @@ node test/layout.e2e.js        # 16  sidebar, density, split basics, timeline dr
 node test/workspace.e2e.js     # 22  panel resize, tab rename/reorder, multi-pane split, shared filters/search
 node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
 node test/files.e2e.js         # 25  Open files list, rail shortcut buttons, focus mode
-node test/fullscreen.e2e.js    # 43  resize and full screen everywhere, appearance checks, preview in its own window
+node test/fullscreen.e2e.js    # 49  resize and full screen everywhere, appearance checks, preview in its own window, Markdown layout buttons
 node test/incident.e2e.js      # 45  incident view: lanes, findings, time window, reader, jump to a line, requests, pins and report, phone
 node test/querybar.e2e.js      # 96  log bar, Filters drop down, Log insights, zoom/ticks, Copy menu, Compare with…, hidden text (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge
 xvfb-run -a node test/ui-desktop.e2e.js   # 10 Electron: title bar, Copilot resize, full-screen window restore, preview window

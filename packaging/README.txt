@@ -387,3 +387,11 @@ PREVIEW IN ITS OWN WINDOW (0.20.0)
   to the front). "Back to the editor" closes the window and shows the preview beside the
   editor again; closing the tab closes its window.
   On the web, allow pop-ups for the site if the browser blocks the window.
+
+MARKDOWN LAYOUT BUTTONS, LIKE INTELLIJ (0.21.0)
+  A Markdown tab has three small buttons in the top-right corner of the editor:
+  Editor only, Editor and Preview, and Preview only. Preview only hides the editor and
+  gives the formatted document the whole width. Each tab keeps its own choice.
+  Alt+Shift+O switches between Preview only and Editor and Preview; Alt+P still turns the
+  preview on and off. The palette has "Markdown: Editor only / Editor and Preview /
+  Preview only". The preview window from 0.20.0 is still there (Alt+Shift+W).

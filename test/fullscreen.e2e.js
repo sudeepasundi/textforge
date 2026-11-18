@@ -256,6 +256,34 @@ const fills = (r, w) => r && r.x === 0 && r.y === 0 && r.w === w.w && r.h === w.
   r = await page.evaluate(() => ({ side: !document.getElementById('preview').hidden, chip: document.getElementById('st-preview').textContent }));
   ok('"Back to the editor" closes the window and shows the preview beside the editor again', r.side && r.chip === 'Preview', JSON.stringify(r));
 
+  // ---------- 0.21.0: Editor only / Editor and Preview / Preview only, like IntelliJ ----------
+  const modes = () => page.evaluate(() => {
+    const vis = (s) => { const e = document.querySelector(s); return !!e && !e.hidden && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0; };
+    const w = (s) => Math.round(document.querySelector(s).getBoundingClientRect().width);
+    const sw = document.getElementById('md-modes').getBoundingClientRect(); const wk = document.getElementById('work').getBoundingClientRect();
+    return { mode: __tf.mdMode(), shown: vis('#md-modes'), on: [...document.querySelectorAll('#md-modes button.on')].map((b) => b.dataset.mode).join(), editor: vis('#editors'), preview: vis('#preview'), pw: vis('#preview') ? w('#preview') : 0, work: w('#work'), corner: wk.right - sw.right <= 24 && sw.top - wk.top <= 8 };
+  });
+  r = await modes();
+  ok('A Markdown tab shows the three layout buttons in the top-right corner', r.shown && r.corner && r.on === 'split', JSON.stringify(r));
+  await page.click('#md-modes [data-mode="preview"]'); await page.waitForTimeout(200);
+  r = await modes();
+  ok('"Preview only" hides the editor and gives the preview the whole width', r.mode === 'preview' && !r.editor && r.preview && Math.abs(r.pw - r.work) <= 1 && r.on === 'preview', JSON.stringify(r));
+  await page.click('#md-modes [data-mode="editor"]'); await page.waitForTimeout(200);
+  r = await modes();
+  ok('"Editor only" hides the preview', r.mode === 'editor' && r.editor && !r.preview && r.shown, JSON.stringify(r));
+  await page.click('#md-modes [data-mode="split"]'); await page.waitForTimeout(200);
+  r = await modes();
+  ok('"Editor and Preview" shows both side by side', r.mode === 'split' && r.editor && r.preview && r.pw < r.work - 100, JSON.stringify(r));
+  await page.keyboard.press('Alt+Shift+O'); await page.waitForTimeout(150);
+  r = await modes();
+  ok('Alt+Shift+O switches to Preview only', r.mode === 'preview', r.mode);
+  await page.evaluate(() => { const t = __tf.newTab({ name: 'plain.log', content: '2024-01-01 10:00:00 INFO a - b' }); __tf.activate(t); });
+  await page.waitForTimeout(200);
+  r = await modes();
+  ok('Each tab keeps its own layout; a log tab has no layout buttons', !r.shown && r.editor, JSON.stringify(r));
+  await page.evaluate(() => { __tf.activate(__tf.tabs.find((x) => x.name === 'notes.md')); __tf.setMdMode('split'); });
+  await page.waitForTimeout(200);
+
   // ---------- phone ----------
   // the sidebar is a drawer over the editor on a phone: close it first, as a phone user would
   await page.evaluate(() => { if (!document.getElementById('side').hidden) document.getElementById('side-close').click(); });
