@@ -1237,3 +1237,13 @@ body.pv-window .md-table-tools button + button { display: none; } /* Edit as tab
 #work.preview-only #editors { display: none; }
 #work.preview-only #preview { flex-basis: 100% !important; border-left: none; }
 #work.preview-only #pv-resize { display: none; }
+
+/* ---- Mermaid diagrams in the preview (0.21.0) ---- */
+.md .md-mermaid { margin: 1em 0; padding: 12px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--editor); text-align: center; }
+.md .md-mermaid svg { max-width: 100%; height: auto; }
+.md .md-mermaid.pending { opacity: .55; min-height: 40px; color: var(--muted); font-size: 12px; }
+.md .md-mermaid.error { text-align: left; border-color: color-mix(in srgb, var(--err) 55%, var(--line)); }
+.md .md-mermaid .mmd-err { color: var(--err); font: 12px/1.5 var(--mono); white-space: pre-wrap; margin-bottom: 8px; }
+.md .md-mermaid.error pre { margin: 0; }
+/* the app-wide icon rule (svg { width: 18px; fill: none; stroke: currentColor }) must not touch Mermaid drawings, also while Mermaid measures them */
+svg[id^="tf-mmd-"] { width: 100%; height: auto; fill: initial; stroke: none; stroke-width: 1; stroke-linecap: butt; stroke-linejoin: miter; flex: initial; }

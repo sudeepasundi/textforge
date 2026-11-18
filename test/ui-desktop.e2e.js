@@ -106,6 +106,17 @@ const appDir = path.join(__dirname, '..');
     return ok(/Preview · pop\.md/.test(a.title) && a.h1 === 'Pop out' && a.rows === 2 && n === 2 && live === 'Typed later' && !side && after === 1 && sideAgain,
       JSON.stringify({ a, windows: n, live, side, after, sideAgain }));
   });
+  // 0.21.0: Mermaid comes from the app's own files on the desktop
+  await check('A mermaid block is drawn in the preview and in the preview window', async () => {
+    await E(() => { const t = __tf.newTab({ name: 'flow.md', content: ['# Flow', '', '```mermaid', 'flowchart LR', '  a[api-gateway] --> b[order-service]', '```', ''].join('\n') }); __tf.activate(t); __tf.setMdMode('split'); });
+    await win.waitForFunction(() => document.querySelector('#preview-doc .md-mermaid svg'), null, { timeout: 20000 }).catch(() => {});
+    const side = await E(() => { const s = document.querySelector('#preview-doc .md-mermaid svg'); return s ? Math.round(s.getBoundingClientRect().width) : 0; });
+    const [pop] = await Promise.all([app.waitForEvent('window', { timeout: 10000 }), E(() => document.getElementById('pv-pop').click())]);
+    await pop.waitForFunction(() => document.querySelector('#preview-doc .md-mermaid svg'), null, { timeout: 10000 }).catch(() => {});
+    const inPop = await pop.evaluate(() => { const s = document.querySelector('#preview-doc .md-mermaid svg'); return s ? Math.round(s.getBoundingClientRect().width) : 0; });
+    await pop.close().catch(() => {});
+    return ok(side > 200 && inPop > 200, `diagram width: side ${side}px, window ${inPop}px`);
+  });
   await check('No errors in the app window', async () => ok(errors.length === 0, errors.join(' | ') || 'none'));
 
   let pass = 0;

@@ -26,6 +26,7 @@
     "package:tauri": "tauri build --no-bundle"
   },
   "dependencies": {
+    "mermaid": "12.3.0",
     "monaco-editor": "^0.52.0"
   },
   "devDependencies": {

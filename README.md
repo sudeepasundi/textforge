@@ -44,6 +44,7 @@ logs automatically.
 - **Tabs:** double-click to rename (unsaved tabs too; saved files are renamed on disk), drag to reorder,
   and right-click for more options.
 - **Editor only / Editor and Preview / Preview only** buttons on Markdown tabs, like IntelliJ (Alt+Shift+O for Preview only).
+- **Mermaid diagrams** in the Markdown preview (flowcharts, sequence diagrams, ...); Copy as rich text pastes them as pictures.
 - **Preview in its own window** (Alt+Shift+W), like VS Code and IntelliJ: put it on another screen; it follows your typing.
 - **Full screen** for the preview (Alt+Shift+P), the comparison, the results panel and Copilot; Esc exits.
   The preview can also be resized by dragging its edge.

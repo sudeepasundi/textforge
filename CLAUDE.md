@@ -57,6 +57,7 @@ What it does that Notepad++ doesn't:
 - Vanilla JavaScript (no framework, no bundler, no TypeScript), HTML, CSS custom properties.
 - Electron 33 (installed 33.4.x) with `contextIsolation: true`, `nodeIntegration: false` and the
   `webview` tag (Copilot only, partition `persist:copilot`).
+- Mermaid 12.3.0 (pinned) for diagrams in the preview, lazy-loaded.
 - Monaco Editor 0.52.2, loaded with its AMD loader (`node_modules/monaco-editor/min`). The web
   single-file build loads it from jsDelivr.
 - @electron/packager 18 for the win32-x64 portable build. It uses `resedit`, so the icon and exe
@@ -159,6 +160,12 @@ command palette (~3628) · misc actions, keyboard shortcuts, init (~3745–end).
 - **Markdown layout (0.21.0):** `#md-modes` (top-right of `#work`) switches Editor only / Editor and Preview / Preview only, like IntelliJ.
   State is per tab: `tab.preview` + `tab.pvOnly` (`mdMode()`, `setMdMode()`); `#work.preview-only` hides `#editors`. Shown for Markdown tabs
   or whenever the preview is on; `updateMdModes()` runs from `applyPreview()` and `updateStatus()`. Alt+Shift+O toggles Preview only.
+- **Mermaid (0.21.0):** `drawMermaid(body)` (called from `renderPreviewInto`) replaces `pre[data-lang=mermaid]` with `.md-mermaid`
+  (source in `data-src`). `mermaidSvg()` lazy-loads `WEB.mermaidSrc` (Electron: `node_modules/mermaid/dist/mermaid.min.js`; selfhost and
+  Tauri: `vendor/mermaid.min.js` copied by build-web.js; artifact: jsDelivr), serialises renders and caches by theme + source.
+  `htmlLabels: false` (no foreignObject) so `richHtmlWithDiagrams()` can turn diagrams into PNGs for Copy as rich text.
+  The global `svg { width: 18px; fill: none }` icon rule is reset for `svg[id^=tf-mmd-]`. release.yml keeps only
+  `mermaid/dist/mermaid.min.js` in the zip.
 - **Results tabs (0.14.0):** `openPanel(mode, title)` keeps one tab per `mode`; switching stashes the DOM nodes of
   `#panel-tools` / `#panel-body`, so code that fills the panel keeps using those ids as before.
 - **Commands:** add new features to the command palette list (`commands()` in the COMMAND PALETTE
@@ -198,10 +205,10 @@ node test/layout.e2e.js        # 16  sidebar, density, split basics, timeline dr
 node test/workspace.e2e.js     # 22  panel resize, tab rename/reorder, multi-pane split, shared filters/search
 node test/snap.e2e.js          # 19  snap layouts, Snap Assist, drag-to-snap
 node test/files.e2e.js         # 25  Open files list, rail shortcut buttons, focus mode
-node test/fullscreen.e2e.js    # 49  resize and full screen everywhere, appearance checks, preview in its own window, Markdown layout buttons
+node test/fullscreen.e2e.js    # 52  resize and full screen everywhere, appearance checks, preview in its own window, Markdown layout buttons, Mermaid
 node test/incident.e2e.js      # 45  incident view: lanes, findings, time window, reader, jump to a line, requests, pins and report, phone
 node test/querybar.e2e.js      # 96  log bar, Filters drop down, Log insights, zoom/ticks, Copy menu, Compare with…, hidden text (timeline, level chips, live text, More filters), result tabs + copy, patterns, selection toolbar, badge
-xvfb-run -a node test/ui-desktop.e2e.js   # 10 Electron: title bar, Copilot resize, full-screen window restore, preview window
+xvfb-run -a node test/ui-desktop.e2e.js   # 11 Electron: title bar, Copilot resize, full-screen window restore, preview window, Mermaid
 ```
 
 Tests use `require('playwright')`, falling back to `~/.npm-global/lib/node_modules/playwright`. The

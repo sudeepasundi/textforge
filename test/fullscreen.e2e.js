@@ -284,6 +284,22 @@ const fills = (r, w) => r && r.x === 0 && r.y === 0 && r.w === w.w && r.h === w.
   await page.evaluate(() => { __tf.activate(__tf.tabs.find((x) => x.name === 'notes.md')); __tf.setMdMode('split'); });
   await page.waitForTimeout(200);
 
+  // ---------- 0.21.0: Mermaid diagrams ----------
+  await page.evaluate(() => { const t = __tf.newTab({ name: 'flow.md', content: ['# Flow', '', '```mermaid', 'flowchart LR', '  a[api-gateway] --> b[inventory-service]', '```', ''].join('\n') }); __tf.activate(t); __tf.setMdMode('split'); });
+  await page.waitForFunction(() => document.querySelector('#preview-doc .md-mermaid svg'), null, { timeout: 20000 }).catch(() => {});
+  r = await page.evaluate(() => { const s = document.querySelector('#preview-doc .md-mermaid svg'); if (!s) return null; const b = s.getBoundingClientRect(); return { w: Math.round(b.width), h: Math.round(b.height), labels: [...s.querySelectorAll('g.node text')].map((x) => x.textContent).join('|'), fill: getComputedStyle(s.querySelector('g.node text')).fill }; });
+  ok('A mermaid block is drawn as a diagram, at full size with readable labels', r && r.w > 300 && r.h > 40 && r.labels === 'api-gateway|inventory-service' && r.fill !== 'none', JSON.stringify(r));
+  await page.evaluate(() => { const m = __tf.active.model; m.setValue(m.getValue().replace('flowchart LR', 'flowchart LRR -->')); });
+  await page.waitForFunction(() => document.querySelector('#preview-doc .md-mermaid.error'), null, { timeout: 10000 }).catch(() => {});
+  r = await page.evaluate(() => { const e = document.querySelector('#preview-doc .md-mermaid.error'); return e ? { msg: e.querySelector('.mmd-err').textContent.slice(0, 40), src: !!e.querySelector('pre') } : null; });
+  ok('A broken diagram shows the error and its source instead', r && /^Mermaid:/.test(r.msg) && r.src, JSON.stringify(r));
+  await page.evaluate(() => { const m = __tf.active.model; m.setValue(m.getValue().replace('flowchart LRR -->', 'flowchart LR')); });
+  await page.waitForFunction(() => document.querySelector('#preview-doc .md-mermaid svg'), null, { timeout: 10000 }).catch(() => {});
+  r = await page.evaluate(async () => { const html = await __tf.richHtml(document.getElementById('preview-doc')); return { png: /<img[^>]+src="data:image\/png/.test(html), svg: /<svg/.test(html) }; });
+  ok('Copy as rich text turns diagrams into pictures (Teams and Outlook do not show SVG)', r.png && !r.svg, JSON.stringify(r));
+  await page.evaluate(() => { __tf.activate(__tf.tabs.find((x) => x.name === 'notes.md')); });
+  await page.waitForTimeout(200);
+
   // ---------- phone ----------
   // the sidebar is a drawer over the editor on a phone: close it first, as a phone user would
   await page.evaluate(() => { if (!document.getElementById('side').hidden) document.getElementById('side-close').click(); });
